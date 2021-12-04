@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from .financial_statement import html2db
-# from financial_statement import html2db
 from requests.exceptions import ConnectionError
 from requests.exceptions import ReadTimeout
 import warnings
@@ -12,8 +11,6 @@ import warnings
 
 import random
 import copy
-# 設定隨機的user agent，可以防止爬蟲被鎖IP
-# 參考網站： https://weikaiwei.com/python/python-crawler-fake-useragent/
 def generate_random_header():
     random_user_agents = {'chrome': ['Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.36',
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2227.1 Safari/537.36',
@@ -290,8 +287,6 @@ def find_best_session():
         try:
             print('獲取新的Session 第', i, '回合')
             headers = generate_random_header()
-            # session為儲存在伺服器端的使用者資料，使用者適用瀏覽器連線到任意網站十，伺服器會怕發SessionID給使用者
-            # 參考網址: https://ivanjo39191.pixnet.net/blog/post/147296298-python-django-%E5%AD%B8%E7%BF%92%E7%B4%80%E9%8C%84%28%E5%85%AD%29-cookies-%E8%88%87-sessions
             ses = requests.Session()
             ses.get('https://www.twse.com.tw/zh/', headers=headers, timeout=10)
             ses.headers.update(headers)
@@ -303,7 +298,7 @@ def find_best_session():
             time.sleep(10)
             
     print('您的網頁IP已經被證交所封鎖，請更新IP來獲取解鎖')
-    print("手機：開啟飛航模式，再關閉，即可獲得新的IP")
+    print("　手機：開啟飛航模式，再關閉，即可獲得新的IP")
     print("數據機：關閉然後重新打開數據機的電源")
 
 ses = None
@@ -340,9 +335,6 @@ def requests_post(*args1, **args2):
     # download data
     i = 3
     while i >= 0:
-        # try: 嘗試讓程式執行該段程式碼; except: 發生錯誤時，根據錯誤決定須執行的項目
-        # try / except (異常處理): https://freelancerlife.info/zh/blog/python%E7%9A%84%E5%98%97%E8%A9%A6try%E8%88%87%E9%8C%AF%E8%AA%A4error%E8%99%95%E7%90%86/
-        # try / except (異常處理): https://ithelp.ithome.com.tw/articles/10231653
         try:
             return ses.post(*args1, timeout=10, **args2)
         except (ConnectionError, ReadTimeout) as error:
@@ -356,155 +348,89 @@ def requests_post(*args1, **args2):
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-# 參考 Unit16
 def crawl_price(date):
-    # The timetuple() method of datetime.date instances returns an object of type time.
-    # 參考資料: https://kkc.github.io/2015/07/08/dealing-with-datetime-and-timezone-in-python/
     datestr = date.strftime('%Y%m%d')
-
-    days = str(date.day)
-    if len(days) == 1:
-        days = "0" + days
-    months = str(date.month)
-    if len(months) == 1:
-        months = "0" + months
-
-    # print(
-    #     'https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&o=csv&d=' + str(date.year - 1911) + '/' + months + '/' + days + '&s=0,asc,0')
-    # https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&o=csv&d=109/11/04&s=0,asc,0
+    
     try:
-        r = requests_post(
-            'https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date=' + datestr + '&type=ALLBUT0999')
-        r.encoding = 'big5'
-        time.sleep(10)
-        r1 = requests_post(
-            'https://www.tpex.org.tw/web/stock/aftertrading/daily_close_quotes/stk_quote_result.php?l=zh-tw&o=csv&d=' + str(
-                date.year - 1911) + '/' + months + '/' + days + '&s=0,asc,0')
-        r1.encoding = 'big5'
+        r = requests_post('https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date=' + datestr + '&type=ALLBUT0999')
     except Exception as e:
         print('**WARRN: cannot get stock price at', datestr)
         print(e)
         return None
-
+    
     content = r.text.replace('=', '')
-    # 原始檔案因為欄數不同，因此需要做切割以便python讀取
+        
+    
     lines = content.split('\n')
-    # 把欄數超過10的內容分離出來，",為文件中換元素的符號，e.g. "電子通路類指數","122.95","+","0.16","0.13","",
-    lines = list(filter(lambda l: len(l.split('",')) > 10, lines))
+    lines = list(filter(lambda l:len(l.split('",')) > 10, lines))
     content = "\n".join(lines)
-
+    
     if content == '':
         return None
-
+    
     df = pd.read_csv(StringIO(content))
     df = df.astype(str)
     df = df.apply(lambda s: s.str.replace(',', ''))
     df['date'] = pd.to_datetime(date)
-    df = df.rename(columns={'證券代號': 'stock_id'})
+    df = df.rename(columns={'證券代號':'stock_id'})
     df = df.set_index(['stock_id', 'date'])
 
-    df = df.apply(lambda s: pd.to_numeric(s, errors='coerce'))
+    df = df.apply(lambda s:pd.to_numeric(s, errors='coerce'))
     df = df[df.columns[df.isnull().all() == False]]
-    df1 = df[~df['收盤價'].isnull()]
+    df = df[~df['收盤價'].isnull()]
 
-    content = r1.text.replace('=', '')
-    # 原始檔案因為欄數不同，因此需要做切割以便python讀取
-    lines = content.split('\n')
-    # 把欄數超過10的內容分離出來，",為文件中換元素的符號，e.g. "電子通路類指數","122.95","+","0.16","0.13","",
-    lines = list(filter(lambda l: len(l.split(',')) > 10, lines))
-    content = "\n".join(lines)
-
-    if content == '':
-        return None
-
-    df = pd.read_csv(StringIO(content))
-    df = df.astype(str)
-    df = df.apply(lambda s: s.str.replace(',', ''))
-
-    df['date'] = pd.to_datetime(date)
-    df.columns = df.columns.str.replace(' ', '')
-    df = df.rename(columns={'代號': 'stock_id', '收盤': '收盤價', '開盤': '開盤價', '最高': '最高價', '最低': '最低價'})
-    df = df.rename(columns={'漲跌': '漲跌(+/-)', '成交金額(元)': '成交金額'})
-    df = df.rename(columns={'最後買價': '最後揭示買價', '最後買量(千股)': '最後揭示買量', '最後賣價': '最後揭示賣價', '最後賣量(千股)': '最後揭示賣量'})
-    df = df.set_index(['stock_id', 'date'])
-    df = df[:-1]
-
-    df = df.apply(lambda s: pd.to_numeric(s, errors='coerce'))
-    df = df[df.columns[df.isnull().all() == False]]
-    df = df.drop(['發行股數', '次日參考價', '次日漲停價', '次日跌停價'], axis=1)
-    df2 = df[~df['收盤價'].isnull()]
-
-    df = pd.concat([df1, df2])
-
+    
     return df
 
-
-# 參考 Unit17
 def crawl_monthly_report(date):
-
-    url = 'https://mops.twse.com.tw/nas/t21/sii/t21sc03_' + str(date.year - 1911) + '_' + str(date.month) + '.html'
-    url1 = 'https://mops.twse.com.tw/nas/t21/otc/t21sc03_' + str(date.year - 1911) + '_' + str(date.month) + '.html'
+    
+    url = 'https://mops.twse.com.tw/nas/t21/sii/t21sc03_'+str(date.year - 1911)+'_'+str(date.month)+'.html'
     print(url)
-    print(url1)
-
+    
     # 偽瀏覽器
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
-
+    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
+    
     # 下載該年月的網站，並用pandas轉換成 dataframe
     try:
         r = requests_get(url, headers=headers, verify=False)
         r.encoding = 'big5'
-        time.sleep(10)
-        r1 = requests_get(url1, headers=headers, verify=False)
-        r1.encoding = 'big5'
     except:
         print('**WARRN: requests cannot get html')
         return None
-
+    
     import lxml
-
+    
     try:
         html_df = pd.read_html(StringIO(r.text))
-        html_df1 = pd.read_html(StringIO(r1.text))
-        html_df = html_df + html_df1
     except:
         print('**WARRN: Pandas cannot find any table in the HTML file')
         return None
-
+    
     # 處理一下資料
-    # 分離出列的第零筆index，數量超過500的，複製
-    # 剩下來疊加欄位數介於5-11的資料，形成一個list
     if html_df[0].shape[0] > 500:
         df = html_df[0].copy()
     else:
         df = pd.concat([df for df in html_df if df.shape[1] <= 11 and df.shape[1] > 5])
-
-    # 主要是確認這張表可否使用levels的方法，只要雙重欄位名稱，才有levels方法可用，levels是attribute
-    # 當今天column有「數層」的狀況下，才會出現levels這個attribute，所以這邊的判斷就是在看column是不是複數喔
-    # 參考資料: https://hahow.in/courses/5a2170d5a6d4a5001ec3148d/discussions/5d688bca85201d0022185dab?item=5acd2f6bd21aee001e55d080
-    # 參考資料: https://ithelp.ithome.com.tw/articles/10185648
+        
     if 'levels' in dir(df.columns):
         df.columns = df.columns.get_level_values(1)
     else:
-        df = df[list(range(0, 10))]
+        df = df[list(range(0,10))]
         column_index = df.index[(df[0] == '公司代號')][0]
         df.columns = df.iloc[column_index]
-
+        
     df['當月營收'] = pd.to_numeric(df['當月營收'], 'coerce')
     df = df[~df['當月營收'].isnull()]
     df = df[df['公司代號'] != '合計']
+    
+    next_month = datetime.date(date.year + int(date.month / 12), ((date.month % 12) + 1), 10)
+    df['date'] = pd.to_datetime(next_month)
 
-    # 這裡可以修改日期
-    # next_month = datetime.date(date.year + int(date.month / 12), ((date.month % 12) + 1), 10)
-    this_month = datetime.date(date.year, date.month, 10)
-    df['date'] = pd.to_datetime(this_month)
-
-    df = df.rename(columns={'公司代號': 'stock_id'})
+    df = df.rename(columns={'公司代號':'stock_id'})
     df = df.set_index(['stock_id', 'date'])
-    df = df.apply(lambda s: pd.to_numeric(s, errors='coerce'))
-    df = df[df.columns[df.isnull().all() == False]].sort_index()
-
+    df = df.apply(lambda s:pd.to_numeric(s, errors='coerce'))
+    df = df[df.columns[df.isnull().all() == False]]
+    
     return df
 
 
@@ -713,7 +639,7 @@ def season_range(start_date, end_date):
     
     ret = []
     for year in range(start_date.year-1, end_date.year+1):
-        ret += [datetime.date(year, 5, 15),
+        ret += [  datetime.date(year, 5, 15),
                 datetime.date(year, 8, 14),
                 datetime.date(year, 11, 14),
                 datetime.date(year+1, 3, 31)]
@@ -722,87 +648,42 @@ def season_range(start_date, end_date):
     return ret
 
 def table_exist(conn, table):
-    # 將使用以前創建的數據庫中創建一個表
-    # 參考資料: http://tw.gitbook.net/sqlite/sqlite_python.html
     return list(conn.execute(
         "select count(*) from sqlite_master where type='table' and name='" + table + "'"))[0][0] == 1
     
 def table_latest_date(conn, table):
-    # 在sql中以倒序方式排列
-    cursor = conn.execute('SELECT DISTINCT date FROM ' + table + ' ORDER BY date DESC LIMIT 1;')
-    # 取得第0藍的表格，取第0列第1個元素轉換成文字，格視為'%Y-%m-%d %H:%M:%S'
-    # 在class5與 class6有簡易測試
+    cursor = conn.execute('SELECT date FROM ' + table + ' ORDER BY date DESC LIMIT 1;')
     return datetime.datetime.strptime(list(cursor)[0][0], '%Y-%m-%d %H:%M:%S') 
 
 def table_earliest_date(conn, table):
     cursor = conn.execute('SELECT date FROM ' + table + ' ORDER BY date ASC LIMIT 1;')
     return datetime.datetime.strptime(list(cursor)[0][0], '%Y-%m-%d %H:%M:%S') 
 
-# def add_to_sql(conn, name, df):
-#
-#     # get the existing dataframe in sqlite3
-#     exist = table_exist(conn, name)
-#     ret = pd.read_sql('select * from ' + name, conn, index_col=['stock_id', 'date']) if exist else pd.DataFrame()
-#
-#     # add new df to the dataframe
-#     ret = ret.append(df)
-#     ret.reset_index(inplace=True)
-#     ret['stock_id'] = ret['stock_id'].astype(str)
-#     ret['date'] = pd.to_datetime(ret['date'])
-#     ret = ret.drop_duplicates(['stock_id', 'date'], keep='last')
-#     ret = ret.sort_values(['stock_id', 'date']).set_index(['stock_id', 'date'])
-#
-#     # add the combined table
-#     ret.to_csv('backup.csv')
-#
-#     try:
-#         ret.to_sql(name, conn, if_exists='replace')
-#     except:
-#         ret = pd.read_csv('backup.csv', parse_dates=['date'], dtype={'stock_id':str})
-#         ret['stock_id'] = ret['stock_id'].astype(str)
-#         ret.set_index(['stock_id', 'date'], inplace=True)
-#         ret.to_sql(name, conn, if_exists='replace')
-
 def add_to_sql(conn, name, df):
+    
     # get the existing dataframe in sqlite3
     exist = table_exist(conn, name)
-    start_date = df.index.get_level_values(1).drop_duplicates().sort_values()[0]
-    end_date = df.index.get_level_values(1).drop_duplicates().sort_values()[-1]
-    ret = pd.read_sql('SELECT * FROM ' + name + ' WHERE date BETWEEN "{}" AND "{}" '.format(start_date, end_date), conn,
-                      index_col=['stock_id', 'date']) if exist else pd.DataFrame()
-    ret = ret.sort_index(ascending=False)
-
+    ret = pd.read_sql('select * from ' + name, conn, index_col=['stock_id', 'date']) if exist else pd.DataFrame()
+    
     # add new df to the dataframe
     ret = ret.append(df)
     ret.reset_index(inplace=True)
     ret['stock_id'] = ret['stock_id'].astype(str)
     ret['date'] = pd.to_datetime(ret['date'])
-
-    # ret = ret[ret.duplicated(keep=False) == False].drop_duplicates(['stock_id', 'date'], keep="last")
-    ret = ret.drop_duplicates(['stock_id', 'date'], keep="last")
-    ret = ret.sort_values(['stock_id', 'date'], ascending=False).set_index(['stock_id', 'date'])
-
+    ret = ret.drop_duplicates(['stock_id', 'date'], keep='last')
+    ret = ret.sort_values(['stock_id', 'date']).set_index(['stock_id', 'date'])
+    
     # add the combined table
     ret.to_csv('backup.csv')
-
+    
     try:
-        # for date in ret.index.get_level_values(1).drop_duplicates():
-        start = ret.index.get_level_values(1).drop_duplicates().sort_values(ascending=True)[0]
-        end = ret.index.get_level_values(1).drop_duplicates().sort_values(ascending=True)[-1]
-        conn.execute('DELETE FROM ' + name + ' WHERE date BETWEEN "{}" AND "{}"'.format(start, end))
-        conn.commit()
-        ret.to_sql(name, conn, if_exists='append')
+        ret.to_sql(name, conn, if_exists='replace')
     except:
-        ret = pd.read_csv('backup.csv', parse_dates=['date'], dtype={'stock_id': str})
+        ret = pd.read_csv('backup.csv', parse_dates=['date'], dtype={'stock_id':str})
         ret['stock_id'] = ret['stock_id'].astype(str)
         ret.set_index(['stock_id', 'date'], inplace=True)
-
-        start = ret.index.get_level_values(1).drop_duplicates().sort_values(ascending=True)[0]
-        end = ret.index.get_level_values(1).drop_duplicates().sort_values(ascending=True)[-1]
-        conn.execute('DELETE FROM ' + name + ' WHERE date BETWEEN "{}" AND "{}"'.format(start, end))
-        conn.commit()
-
-        ret.to_sql(name, conn, if_exists='append')
+        ret.to_sql(name, conn, if_exists='replace')
+    
 
 def update_table(conn, table_name, crawl_function, dates):
     
@@ -811,10 +692,9 @@ def update_table(conn, table_name, crawl_function, dates):
     
     df = pd.DataFrame()
     dfs = {}
-
-    # 參考資料: https://blog.csdn.net/zejianli/article/details/77915751
+    
     progress = tqdm_notebook(dates, )
-
+    
     for d in progress:
         
         print('crawling', d)
@@ -829,24 +709,24 @@ def update_table(conn, table_name, crawl_function, dates):
         elif isinstance(data, dict):
             if len(dfs) == 0:
                 dfs = {i:pd.DataFrame() for i in data.keys()}
-
+                    
             for i, d in data.items():
                 dfs[i] = dfs[i].append(d)
-
-            # update single dataframe
+                
+        # update single dataframe
         else:
             df = df.append(data)
             print('success')
+
             
         if len(df) > 50000:
             add_to_sql(conn, table_name, df)
             df = pd.DataFrame()
             print('save', len(df))
-
-        print('Please wait for 15 seconds')
+            
         time.sleep(15)
-
-    print('crawling completed')
+        
+        
         
     if df is not None and len(df) != 0:
         add_to_sql(conn, table_name, df)
@@ -901,103 +781,4 @@ def widget(conn, table_name, crawl_func, range_date):
 
     items = [date_picker_from, date_picker_to, btn]
     display(widgets.VBox([label, widgets.HBox(items)]))
-
-
-"""
-# 參考 Unit17，原版本備份
-def crawl_monthly_report(date):
-
-    url = 'https://mops.twse.com.tw/nas/t21/sii/t21sc03_'+str(date.year - 1911)+'_'+str(date.month)+'.html'
-    print(url)
-
-    # 偽瀏覽器
-    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36'}
-
-    # 下載該年月的網站，並用pandas轉換成 dataframe
-    try:
-        r = requests_get(url, headers=headers, verify=False)
-        r.encoding = 'big5'
-    except:
-        print('**WARRN: requests cannot get html')
-        return None
-
-    import lxml
-
-    try:
-        html_df = pd.read_html(StringIO(r.text))
-    except:
-        print('**WARRN: Pandas cannot find any table in the HTML file')
-        return None
-
-    # 處理一下資料
-    # 分離出列的第零筆index，數量超過500的，複製
-    # 剩下來疊加欄位數介於5-11的資料，形成一個list
-    if html_df[0].shape[0] > 500:
-        df = html_df[0].copy()
-    else:
-        df = pd.concat([df for df in html_df if df.shape[1] <= 11 and df.shape[1] > 5])
-
-    # 主要是確認這張表可否使用levels的方法，只要雙重欄位名稱，才有levels方法可用，levels是attribute
-    # 當今天column有「數層」的狀況下，才會出現levels這個attribute，所以這邊的判斷就是在看column是不是複數喔
-    # 參考資料: https://hahow.in/courses/5a2170d5a6d4a5001ec3148d/discussions/5d688bca85201d0022185dab?item=5acd2f6bd21aee001e55d080
-    # 參考資料: https://ithelp.ithome.com.tw/articles/10185648
-    if 'levels' in dir(df.columns):
-        df.columns = df.columns.get_level_values(1)
-    else:
-        df = df[list(range(0,10))]
-        column_index = df.index[(df[0] == '公司代號')][0]
-        df.columns = df.iloc[column_index]
-
-    df['當月營收'] = pd.to_numeric(df['當月營收'], 'coerce')
-    df = df[~df['當月營收'].isnull()]
-    df = df[df['公司代號'] != '合計']
-
-    # 這裡可以修改日期
-    next_month = datetime.date(date.year + int(date.month / 12), ((date.month % 12) + 1), 10)
-    df['date'] = pd.to_datetime(next_month)
-
-    df = df.rename(columns={'公司代號':'stock_id'})
-    df = df.set_index(['stock_id', 'date'])
-    df = df.apply(lambda s:pd.to_numeric(s, errors='coerce'))
-    df = df[df.columns[df.isnull().all() == False]]
-
-    return df
-"""
-'''
-# 參考 Unit16
-def crawl_price(date):
-    # The timetuple() method of datetime.date instances returns an object of type time.
-    # 參考資料: https://kkc.github.io/2015/07/08/dealing-with-datetime-and-timezone-in-python/
-    datestr = date.strftime('%Y%m%d')
-
-    try:
-        r = requests_post('https://www.twse.com.tw/exchangeReport/MI_INDEX?response=csv&date=' + datestr + '&type=ALLBUT0999')
-    except Exception as e:
-        print('**WARRN: cannot get stock price at', datestr)
-        print(e)
-        return None
     
-    content = r.text.replace('=', '')
-
-    # 原始檔案因為欄數不同，因此需要做切割以便python讀取
-    lines = content.split('\n')
-    # 把欄數超過10的內容分離出來，",為文件中換元素的符號，e.g. "電子通路類指數","122.95","+","0.16","0.13","",
-    lines = list(filter(lambda l:len(l.split('",')) > 10, lines))
-    content = "\n".join(lines)
-    
-    if content == '':
-        return None
-    
-    df = pd.read_csv(StringIO(content))
-    df = df.astype(str)
-    df = df.apply(lambda s: s.str.replace(',', ''))
-    df['date'] = pd.to_datetime(date)
-    df = df.rename(columns={'證券代號':'stock_id'})
-    df = df.set_index(['stock_id', 'date'])
-
-    df = df.apply(lambda s:pd.to_numeric(s, errors='coerce'))
-    df = df[df.columns[df.isnull().all() == False]]
-    df = df[~df['收盤價'].isnull()]
-
-    return df
-'''

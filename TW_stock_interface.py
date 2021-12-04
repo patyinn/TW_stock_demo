@@ -328,7 +328,8 @@ class Page_FSAnalysis(Frame):
         self.symbol_text = StringVar()
         self.symbol_list = self.getfileid()[0]
         self.symbol_list.insert(0, "all")
-        self.symbol_combo = ttk.Combobox(self, textvariable=self.symbol_text, values=self.symbol_list)
+        self.symbol_combo = ttk.Combobox(self, textvariable=self.symbol_text, values=self.symbol_list,
+                                         postcommand=self.update_func)
         self.symbol_combo.grid(row=2, column=1, sticky=W)
 
         # 選擇要執行的項目
@@ -367,8 +368,9 @@ class Page_FSAnalysis(Frame):
             type = "directory"
             scpr.del_path_sql(type, path)
 
-    # 顯示作業進度
+    # 更新股票代號
     def update_func(self):
+        self.path = self.path_combo.get()
         symbol = self.getfileid()[0]
         symbol.insert(0, "all")
         self.symbol_combo['values'] = symbol
@@ -394,94 +396,98 @@ class Page_FSAnalysis(Frame):
             else:
                 File_path = list_dict[id]
 
-            FSA = scpr.TW_scrapper(File_path)
+            FSA = scpr.TW_FinancialAnalysis(File_path)
 
-            if exec == "all":
-                FSA.Update_Monthly_report(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 月報\n".format(id))
-                self.update()
-                self.after(1000)
-                FSA.Update_Season_report(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 季報\n".format(id))
-                self.update()
-                self.after(1000)
-                FSA.Update_CashFlow(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 現金流量表\n".format(id))
-                self.update()
-                self.after(1000)
-                FSA.Update_PRICEToday(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
-                self.update()
-                self.after(1000)
-                FSA.Update_PER(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
-                self.update()
-                self.after(1000)
-                FSA.Update_Directors_and_supervisors(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 股東占比\n".format(id))
-                self.update()
-                self.after(1000)
+            try:
+                if exec == "all":
+                    FSA.Update_Monthly_report(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 月報\n".format(id))
+                    self.update()
+                    self.after(1000)
+                    FSA.Update_Season_report(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 季報\n".format(id))
+                    self.update()
+                    self.after(1000)
+                    FSA.Update_CashFlow(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 現金流量表\n".format(id))
+                    self.update()
+                    self.after(1000)
+                    FSA.Update_PRICEToday(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
+                    self.update()
+                    self.after(1000)
+                    FSA.Update_PER(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
+                    self.update()
+                    self.after(1000)
+                    FSA.Update_Directors_and_supervisors(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 股東占比\n".format(id))
+                    self.update()
+                    self.after(1000)
 
-            elif exec == "更新月報":
-                FSA.Update_Monthly_report(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 月報\n".format(id))
-                self.update()
-                self.after(1000)
-                FSA.Update_PRICEToday(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
-                self.update()
-                self.after(1000)
-                FSA.Update_PER(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
-                self.update()
-                self.after(1000)
+                elif exec == "更新月報":
+                    FSA.Update_Monthly_report(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 月報\n".format(id))
+                    self.update()
+                    self.after(1000)
+                    FSA.Update_PRICEToday(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
+                    self.update()
+                    self.after(1000)
+                    FSA.Update_PER(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
+                    self.update()
+                    self.after(1000)
 
-            elif exec == "更新季報":
-                FSA.Update_Season_report(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 季報\n".format(id))
-                self.update()
-                self.after(1000)
-                FSA.Update_CashFlow(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 現金流量表\n".format(id))
-                self.update()
-                self.after(1000)
-                FSA.Update_PRICEToday(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
-                self.update()
-                self.after(1000)
-                FSA.Update_PER(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
-                self.update()
-                self.after(1000)
+                elif exec == "更新季報":
+                    FSA.Update_Season_report(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 季報\n".format(id))
+                    self.update()
+                    self.after(1000)
+                    FSA.Update_CashFlow(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 現金流量表\n".format(id))
+                    self.update()
+                    self.after(1000)
+                    FSA.Update_PRICEToday(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
+                    self.update()
+                    self.after(1000)
+                    FSA.Update_PER(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
+                    self.update()
+                    self.after(1000)
 
-            elif exec == "更新PER與今日價位":
-                FSA.Update_PRICEToday(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
-                self.update()
-                self.after(1000)
-                FSA.Update_PER(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
-                self.update()
-                self.after(1000)
+                elif exec == "更新PER與今日價位":
+                    FSA.Update_PRICEToday(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
+                    self.update()
+                    self.after(1000)
+                    FSA.Update_PER(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
+                    self.update()
+                    self.after(1000)
 
-            elif exec == "更新股東占比":
-                FSA.Update_PRICEToday(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
-                self.update()
-                self.after(1000)
-                FSA.Update_PER(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
-                self.update()
-                self.after(1000)
-                FSA.Update_Directors_and_supervisors(id, path=File_path)
-                self.scrolltxt.insert(INSERT, "完成更新 {} 的 股東占比\n".format(id))
-                self.update()
-                self.after(1000)
+                elif exec == "更新股東占比":
+                    FSA.Update_PRICEToday(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
+                    self.update()
+                    self.after(1000)
+                    FSA.Update_PER(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
+                    self.update()
+                    self.after(1000)
+                    FSA.Update_Directors_and_supervisors(id, path=File_path)
+                    self.scrolltxt.insert(INSERT, "完成更新 {} 的 股東占比\n".format(id))
+                    self.update()
+                    self.after(1000)
 
-            else:
-                self.scrolltxt.insert(INSERT, "輸入有誤\n")
+                else:
+                    self.scrolltxt.insert(INSERT, "輸入有誤\n")
 
-        self.scrolltxt.insert(INSERT, "完成\n")
+                self.scrolltxt.insert(INSERT, "完成\n")
+            except:
+                self.scrolltxt.insert(INSERT, "{}發生問題，可能是資料庫有誤\n".format(id))
+
 
         path = self.tplt_path_text.get()
         directory = self.path_text.get()

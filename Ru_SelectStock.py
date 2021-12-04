@@ -1,13 +1,13 @@
 from finlab.data import Data
 import pandas as pd
 from matplotlib import pyplot as plt
-import datetime
+# import datetime
 import numpy as np
-import warnings
+# import warnings
 import math
 import os
 import openpyxl
-from openpyxl import Workbook
+import operator
 
 def toSeasonal(df):
     season4 = df[df.index.month == 3]
@@ -87,7 +87,7 @@ def mystrategy(data, date):
     # 並且把它們合併起來
     權益總計.fillna(權益總額, inplace=True)
 
-    股東權益報酬率 = (稅後淨利.iloc[-4:].sum()) / 權益總計.iloc[-1]
+    股東權益報酬率 = ((稅後淨利.iloc[-4:].sum()) / 權益總計.iloc[-1]) * 100
 
     營業利益 = data.get3(name='營業利益（損失）', n=9, start=date)
     Revenue_Season = data.get3(name='營業收入合計', n=9, start=date)
@@ -119,10 +119,11 @@ def mystrategy(data, date):
 
     rsv = (price.iloc[-1] - price.iloc[-60:].min()) / (price.iloc[-60:].max() - price.iloc[-60:].min())
 
+    print(八季營益率成長率[八季營益率成長率 <= -30].dropna(axis=1, how="all").dropna(how="all"))
     condition_list = [
         市值 > 5e9,
         三年自由現金流 > 0,
-        股東權益報酬率 > 0.15,
+        股東權益報酬率 > 15,
         營業利益年成長率 >= 0,
         八季營益率成長率[八季營益率成長率 <= -30].notnull().sum() < 2,
         # 市值營收比 < 5,
@@ -136,7 +137,8 @@ def mystrategy(data, date):
     select_stock = condition_list[0]
     for con in range(len(condition_list)):
         select_stock = select_stock & condition_list[con]
-
+    print(select_stock)
+    print(select_stock[select_stock])
     return select_stock[select_stock]
 
 def backtest1(start_date, end_date, hold_days, data, weight='average', benchmark=None, stop_loss=None,
@@ -305,7 +307,7 @@ def SaveExcel(ID):
 
     path = "D:\GOOGLE 雲端硬碟\Google 雲端硬碟\個人計畫追蹤\財報分析\台股\樣板_財報分析.xlsx"
     wb = openpyxl.load_workbook(path)
-    new_path = "D:\GOOGLE 雲端硬碟\Google 雲端硬碟\個人計畫追蹤\財報分析\台股\測試資料夾\O_"+ ID +"_ooo財報分析.xlsx"
+    new_path = "D:\GOOGLE 雲端硬碟\Google 雲端硬碟\個人計畫追蹤\財報分析\台股\測選股結果\O_"+ ID +"_ooo財報分析.xlsx"
     wb.save(new_path)
 
 '''
@@ -320,21 +322,21 @@ data = Data()
 start = datetime.date(2021,4,1)
 end = datetime.date(2021,5,22)
 # date = start
-# 起始日期、結束日期、每幾天更換一次名單、選股策略、資料庫連結
-profit , record = backtest1(start, end, 31, data , stop_loss=-10, stop_profit=50)
-# profit , record = backtest(start, end, 30, mystrategy(data, end), data)
-
-print("交易利潤: ")
-print(profit)
-print("交易紀錄: ")
-print(record)
+# # 起始日期、結束日期、每幾天更換一次名單、選股策略、資料庫連結
+# profit, record = backtest1(start, end, 31, data, stop_loss=-10, stop_profit=50)
+# # profit , record = backtest(start, end, 30, mystrategy(data, end), data)
+#
+# print("交易利潤: ")
+# print(profit)
+# print("交易紀錄: ")
+# print(record)
 
 print("最新選股結果為: ")
-print(mystrategy(data, end))
+# print(mystrategy(data, end))
 list = list(mystrategy(data, end).index)
 print(list)
-Exist = ExistFile()
-print(Exist)
+# Exist = ExistFile()
+# print(Exist)
 # for id in list:
 #     if id in Exist:
 #         print(id, "已存在")

@@ -359,9 +359,8 @@ def Update_Directors_and_supervisors(path, Stock_ID):
 
 
 # 顯示指定資料夾的內容
-target_folder = 'D:\GOOGLE 雲端硬碟\Google 雲端硬碟\個人計畫追蹤\財報分析'
+target_folder = 'D:\GOOGLE 雲端硬碟\Google 雲端硬碟\個人計畫追蹤\財報分析\台股'
 file = show_folder_content(target_folder, prefix="O_", postfix=".xlsx")
-
 index = []
 dictionary = {}
 for num in file[0:]:

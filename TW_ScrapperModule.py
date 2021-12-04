@@ -34,9 +34,9 @@ import operator
 
 # 檢查下載檔案機制有問題
 conn = sqlite3.connect(os.path.join("data", "data.db"))
-data = Data()
+# data = Data()
 
-class TW_scrapper():
+class TW_FinancialAnalysis(Data):
     def __init__(self, path=None):
         self.File_path = path
         self.wb = load_workbook(self.File_path)
@@ -45,7 +45,18 @@ class TW_scrapper():
         self.ws2 = self.wb["現金流量"]
         self.ws3 = self.wb["進出場參考"]
         self.ws4 = self.wb["合理價推估"]
+        super().__init__()
 
+    def Season_transform(self, date, spec=None):
+        if date is not pd.Series(dtype='object'):
+            date = pd.Series(date)
+        df = pd.DataFrame()
+        df['Quarter'] = pd.to_datetime(date)
+        df['Quarter'] = df['Quarter'].dt.to_period('Q').dt.strftime("%YQ%q")
+        if spec:
+            return df['Quarter']
+        else:
+            return df['Quarter'].iloc[-1]
     def Season_determination(self, date):
         year = date.year
         if date.month <= 3:
@@ -173,7 +184,6 @@ class TW_scrapper():
         else:
             sheet.cell(row=rows, column=cols).font = Font(color='000000')  # 黑色
             sheet.cell(row=rows, column=1).fill = PatternFill(fill_type="solid", fgColor="FFFFFF")  # 白色
-
     def Write2Excel(self, data, rounds=None, sheet=None, rows=None, cols=None, string=None, date=None):
         data = round(data, rounds)
         sheet.cell(row=rows, column=cols).value = data
@@ -181,7 +191,6 @@ class TW_scrapper():
 
         if string:
             print("新增", date, "的"+string+":", data)
-
     def CashFlowGet(self, rawData):
 
         rawData = rawData.fillna(0)
@@ -214,7 +223,7 @@ class TW_scrapper():
     def Update_Monthly_report(self, Stock_ID, path):
 
         '''    從資料庫獲取月營收最新日期    '''
-        Revenue_Month = data.get('當月營收', 2)
+        Revenue_Month = super().get('當月營收', 2)
 
         '''    時間判斷    '''
         # 改成用資料庫的最新時間尤佳
@@ -229,11 +238,11 @@ class TW_scrapper():
 
             '''        根據相差月份取相對應數量的資料        '''
             add_revenue = add_row_num + 24
-            Revenue_Month = data.get('當月營收', add_revenue) * 0.00001
+            Revenue_Month = super().get('當月營收', add_revenue) * 0.00001
             add_price = add_row_num * 40
-            price = data.get('收盤價', add_price)
-            MR_MonthGrowth = data.get('上月比較增減(%)', add_revenue)
-            MR_YearGrowth = data.get('去年同月增減(%)', add_revenue)
+            price = super().get('收盤價', add_price)
+            MR_MonthGrowth = super().get('上月比較增減(%)', add_revenue)
+            MR_YearGrowth = super().get('去年同月增減(%)', add_revenue)
 
             # 輸入數字並存在變數中，可以透過該變數(字串)，呼叫特定股票
             Month_Revenue = Revenue_Month[Stock_ID]
@@ -312,8 +321,6 @@ class TW_scrapper():
 
         dfs = pd.read_html(StringIO(r.text))
         df = pd.concat([df for df in dfs if df.shape[1] > 15 and df.shape[0] > 30])
-        df.columns = [df.iloc[0], df.iloc[1]]
-
         idx = pd.IndexSlice
         df = df.loc[idx[:], idx[["月別", "全體董監持股"], :]]
         df.columns = df.columns.get_level_values(1)
@@ -365,7 +372,7 @@ class TW_scrapper():
         print("Directors and supervisors end")
     def Update_Season_report(self, Stock_ID, path):
         '''    從資料庫獲取季報最新日期    '''
-        Revenue_Season = data.get2('營業收入合計', 5)
+        Revenue_Season = super().get2('營業收入合計', 5)
         # print(Revenue_Season)
         Revenue_Season = Revenue_Season[Stock_ID]
 
@@ -383,30 +390,30 @@ class TW_scrapper():
 
             '''        根據相差月份取相對應數量的資料        '''
             get_data_num = add_column_num + 6
-            Revenue_Season = data.get2('營業收入合計', get_data_num) * 0.00001  # 單位: 億
+            Revenue_Season = super().get2('營業收入合計', get_data_num) * 0.00001  # 單位: 億
             # 營業利益率，也可以簡稱營益率，英文Operating Margin或Operating profit Margin
-            OPM_raw = data.get2('營業利益（損失）', get_data_num) * 0.00001  # 單位: 億
-            gross_profit = data.get2('營業毛利（毛損）', get_data_num) * 0.00001  # 單位: 億
-            Equity = data.get2("股本合計", get_data_num) * 0.00001  # 單位: 億
-            profit_before_tax = data.get2("繼續營業單位稅前淨利（淨損）", get_data_num) * 0.00001  # 單位: 億  本期稅前淨利（淨損）
-            profit_after_tax = data.get2("本期淨利（淨損）", get_data_num) * 0.00001  # 單位: 億
-            Operating_costs = data.get2("營業成本合計", get_data_num) * 0.00001  # 單位: 億
-            Account_receivable = data.get2("應收帳款淨額", get_data_num) * 0.00001  # 單位: 億
-            inventory = data.get2("存貨", get_data_num) * 0.00001  # 單位: 億
-            Assets = data.get2("資產總計", get_data_num) * 0.00001  # 單位: 億
-            Liabilities = data.get2("負債總計", get_data_num) * 0.00001  # 單位: 億
-            Accounts_payable = data.get2("應付帳款", get_data_num) * 0.00001  # 單位: 億
-            Intangible_Assets = data.get2("無形資產", get_data_num) * 0.00001  # 單位: 億
-            Depreciation = data.get2("折舊費用", get_data_num, table="Cash_flows") * 0.00001  # 單位: 億
-            Net_Income = data.get2('本期淨利（淨損）', get_data_num) * 0.00001  # 單位: 億
+            OPM_raw = super().get2('營業利益（損失）', get_data_num) * 0.00001  # 單位: 億
+            gross_profit = super().get2('營業毛利（毛損）', get_data_num) * 0.00001  # 單位: 億
+            Equity = super().get2("股本合計", get_data_num) * 0.00001  # 單位: 億
+            profit_before_tax = super().get2("繼續營業單位稅前淨利（淨損）", get_data_num) * 0.00001  # 單位: 億  本期稅前淨利（淨損）
+            profit_after_tax = super().get2("本期淨利（淨損）", get_data_num) * 0.00001  # 單位: 億
+            Operating_costs = super().get2("營業成本合計", get_data_num) * 0.00001  # 單位: 億
+            Account_receivable = super().get2("應收帳款淨額", get_data_num) * 0.00001  # 單位: 億
+            inventory = super().get2("存貨", get_data_num) * 0.00001  # 單位: 億
+            Assets = super().get2("資產總計", get_data_num) * 0.00001  # 單位: 億
+            Liabilities = super().get2("負債總計", get_data_num) * 0.00001  # 單位: 億
+            Accounts_payable = super().get2("應付帳款", get_data_num) * 0.00001  # 單位: 億
+            Intangible_Assets = super().get2("無形資產", get_data_num) * 0.00001  # 單位: 億
+            Depreciation = super().get2("折舊費用", get_data_num, table="Cash_flows") * 0.00001  # 單位: 億
+            Net_Income = super().get2('本期淨利（淨損）', get_data_num) * 0.00001  # 單位: 億
             # 修正：因為有些股東權益的名稱叫作「權益總計」有些叫作「權益總額」，所以要先將這兩個dataframe合併起來喔！
-            權益總計 = data.get2('權益總計', get_data_num)
-            權益總額 = data.get2('權益總額', get_data_num)
+            權益總計 = super().get2('權益總計', get_data_num)
+            權益總額 = super().get2('權益總額', get_data_num)
             # 把它們合併起來（將「權益總計」為NaN的部分填上「權益總額」）
             Shareholders_equity = 權益總計.fillna(權益總額, inplace=False) * 0.00001  # 單位: 億
 
             price_num = add_column_num * 65
-            price = data.get2("收盤價", price_num)
+            price = super().get2("收盤價", price_num)
 
             '''        輸入數字並存在變數中，可以透過該變數(字串)，呼叫特定股票        '''
             Revenue_Season = Revenue_Season[Stock_ID]
@@ -674,7 +681,7 @@ class TW_scrapper():
     def Update_CashFlow(self, Stock_ID, path):
 
         '''    從資料庫獲取季報最新日期    '''
-        Cash_Flow_for_investing = data.get2("投資活動之淨現金流入（流出）", 5)
+        Cash_Flow_for_investing = super().get2("投資活動之淨現金流入（流出）", 5)
         Cash_Flow_for_investing = Cash_Flow_for_investing[Stock_ID]
 
         '''    時間判斷    '''
@@ -698,15 +705,15 @@ class TW_scrapper():
             '''        根據相差月份取相對應數量的資料        '''
             get_data_num = add_column_num * 4
             # Cash Flow for investing
-            Cash_Flow_for_investing = data.get2("投資活動之淨現金流入（流出）", get_data_num)
+            Cash_Flow_for_investing = super().get2("投資活動之淨現金流入（流出）", get_data_num)
             # Operating Cash Flow
-            Operating_Cash_Flow = data.get2("營業活動之淨現金流入（流出）", get_data_num)
+            Operating_Cash_Flow = super().get2("營業活動之淨現金流入（流出）", get_data_num)
             # Cash Flows Provided from Financing Activities
-            Cash_Flow_for_Financing = data.get2("籌資活動之淨現金流入（流出）", get_data_num)
+            Cash_Flow_for_Financing = super().get2("籌資活動之淨現金流入（流出）", get_data_num)
             # Cash Balances - Beginning of Period
-            Cash_Balances_Beginning = data.get2("期初現金及約當現金餘額", get_data_num)
+            Cash_Balances_Beginning = super().get2("期初現金及約當現金餘額", get_data_num)
             # Cash Balances - End of Period
-            Cash_Balances_End = data.get2("期末現金及約當現金餘額", get_data_num)
+            Cash_Balances_End = super().get2("期末現金及約當現金餘額", get_data_num)
 
 
             '''        輸入數字並存在變數中，可以透過該變數(字串)，呼叫特定股票        '''
@@ -784,35 +791,32 @@ class TW_scrapper():
 
         '''    使用現在的時間當作最新的更新時間點    '''
         now = datetime.datetime.now()
-        date = pd.Series(now)
-        df = pd.DataFrame()
-        df['Quarter'] = pd.to_datetime(date)
-        df['Quarter'] = df['Quarter'].dt.to_period('Q').dt.strftime("%YQ%q")
-        latest_date_str = df['Quarter'].iloc[-1]
+        Season_now = self.Season_transform(now)
 
+        # 與table最新資料比對時間，決定需要增加的數據量
         table_month = self.ws4["A16"].value
-        add_row_num = 4 * (int(latest_date_str[0:4]) - int(table_month[0:4])) + (
-                    int(latest_date_str[-1]) - int(table_month[-1]))
+        add_row_num = 4 * (int(Season_now[0:4]) - int(table_month[0:4])) + (int(Season_now[-1]) - int(table_month[-1]))
 
         if add_row_num <= 0:
             print("Update PER this year.")
         else:
             print("Increase PER this season and update PER this year.")
 
+        # 決定要更新多少當年度的PER，抓取excel同年度資料，寫進Update_row
         PER_data = [self.ws4.cell(row=n, column=1).value[0:4] for n in range(16, 20) if self.ws4.cell(row=n, column=1).value]
         Update_row = 0
-        for n in range(len(PER_data)):
-            if PER_data[n] == now.strftime("%Y"):
+        for n in PER_data:
+            if n == now.strftime("%Y"):
                 Update_row += 1
 
+        # 根據需要跟新以及新增的數量，去從sqlite3抓取相對應的數據量
         total_num = Update_row + add_row_num
-
         get_data_num = total_num + 4
-        Equity = data.get2("股本合計", get_data_num) * 0.00001  # 單位: 億
-        profit_after_tax = data.get2("本期淨利（淨損）", get_data_num) * 0.00001  # 單位: 億
+        Equity = super().get2("股本合計", get_data_num) * 0.00001  # 單位: 億
+        profit_after_tax = super().get2("本期淨利（淨損）", get_data_num) * 0.00001  # 單位: 億
 
         price_num = (total_num) * 100
-        price = data.get2("收盤價", price_num)
+        price = super().get2("收盤價", price_num)
 
         Equity = Equity[Stock_ID].dropna()
         profit_after_tax = profit_after_tax[Stock_ID].dropna()
@@ -827,19 +831,23 @@ class TW_scrapper():
         Estimated_EPS = EPS.rolling(4).sum()
 
         '''  檢查公布財報的EPS時間與實際時間的差別，如果尚未公布財報則填入現在的時間，新增最新時間資料  '''
-        FR_date = self.Season_determination(Estimated_EPS.index[-1])
-        num = 4 * (int(latest_date_str[0:4]) - int(FR_date[0:4])) + (int(latest_date_str[-1]) - int(FR_date[-1]))
+        FR_date = self.Season_transform(Estimated_EPS.index[-1])
+        num = 4 * (int(Season_now[0:4]) - int(FR_date[0:4])) + (int(Season_now[-1]) - int(FR_date[-1]))
+
         for n in range(num):
             date = self.deltaSeasons(Estimated_EPS.index[-1], -1)
             Estimated_EPS[date] = Estimated_EPS[-1]
 
+        Estimated_EPS.index = self.Season_transform(Estimated_EPS.index, spec=True)
+
         Start = 16
         End = 16 + Update_row
+
+        # 更新今年度的PER
         for add_row in range(Start, End):
 
-            Update_date = self.Season2Month(self.ws4.cell(row=add_row, column=1).value)
-            Update_Season = self.ws4.cell(row=add_row, column=1).value
-
+            # 從財報上資料判斷要更新的季節
+            Update_Season = str(self.ws4.cell(row=add_row, column=1).value)
             if Update_Season[-1] == "1":
                 PRICE = price_Q1.loc[Update_Season[0:4]][-1]
             elif Update_Season[-1] == "2":
@@ -848,12 +856,13 @@ class TW_scrapper():
                 PRICE = price_Q3.loc[Update_Season[0:4]][-1]
             else:
                 PRICE = price_Q4.loc[Update_Season[0:4]][-1]
-            E_EPS = Estimated_EPS.loc[Update_date][-1]
+            E_EPS = Estimated_EPS.loc[Update_Season]
             PER = PRICE / E_EPS
 
             print("更新 ", self.ws4.cell(row=add_row, column=1).value," 的EPS: ", round(E_EPS, 2))
             self.Write2Excel(PER, rounds=2, sheet=self.ws4, rows=add_row, cols=2, string="更新PER", date=Update_Season)
 
+        # 新增PER資料
         add_row_num *= -1
 
         for add_row in range(add_row_num, 0, 1):
@@ -861,10 +870,9 @@ class TW_scrapper():
             self.ws4.insert_rows(16, amount=1)
 
             Update_Season_date = Estimated_EPS.index[add_row]
-            Update_Season_str = Update_Season_date.strftime('%Y-%m')
 
             '''  新增季度標籤  '''
-            Update_Season = self.Season_determination(Update_Season_date)
+            Update_Season = self.Season_transform(Update_Season_date)
 
             self.ws4.cell(row=16, column=1).value = Update_Season
             self.ws4.cell(row=16, column=1).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -880,7 +888,7 @@ class TW_scrapper():
                 PRICE = price_Q3.loc[Update_Season[0:4]][-1]
             else:
                 PRICE = price_Q4.loc[Update_Season[0:4]][-1]
-            E_EPS = Estimated_EPS.loc[Update_Season_str][-1]
+            E_EPS = Estimated_EPS.loc[Update_Season]
             PER = PRICE / E_EPS
 
             print("使用季度: ", Update_Season, " 所得到的EPS: ", round(E_EPS, 2))
@@ -889,10 +897,10 @@ class TW_scrapper():
         self.wb.save(path)
     def Update_PRICEToday(self, Stock_ID, path):
 
-        Highest = data.get('最高價', 1)
-        Lowest = data.get('最低價', 1)
-        Opening = data.get('開盤價', 1)
-        Closing = data.get('收盤價', 1)
+        Highest = super().get('最高價', 1)
+        Lowest = super().get('最低價', 1)
+        Opening = super().get('開盤價', 1)
+        Closing = super().get('收盤價', 1)
 
         Highest = Highest[Stock_ID]
         Lowest = Lowest[Stock_ID]
@@ -912,9 +920,9 @@ class TW_scrapper():
 
         self.wb.save(path)
 
-class SelectStock():
+class SelectStock(Data):
     def __init__(self):
-        pass
+        super().__init__()
 
     def toSeasonal(self, df):
         season4 = df[df.index.month == 3]
@@ -946,40 +954,40 @@ class SelectStock():
 
     def mystrategy(self, date, exec, bool):
 
-        股本 = data.get3(name='股本合計', n=1, start=date)
-        price = data.get3(name='收盤價', n=120, start=date)
+        股本 = super().get3(name='股本合計', n=1, start=date)
+        price = super().get3(name='收盤價', n=120, start=date)
         當天股價 = price[:股本.index[-1]].iloc[-1]
         當天股本 = 股本.iloc[-1]
         市值 = 當天股本 * 當天股價 / 10 * 1000
 
-        df1 = self.toSeasonal(data.get3(name='投資活動之淨現金流入（流出）', n=15, start=date))
-        df2 = self.toSeasonal(data.get3(name='營業活動之淨現金流入（流出）', n=15, start=date))
+        df1 = self.toSeasonal(super().get3(name='投資活動之淨現金流入（流出）', n=15, start=date))
+        df2 = self.toSeasonal(super().get3(name='營業活動之淨現金流入（流出）', n=15, start=date))
         三年自由現金流 = (df1 + df2).iloc[-12:].mean()
 
-        稅後淨利 = data.get3(name='本期淨利（淨損）', n=9, start=date)
+        稅後淨利 = super().get3(name='本期淨利（淨損）', n=9, start=date)
         # 股東權益，有兩個名稱，有些公司叫做權益總計，有些叫做權益總額
         # 所以得把它們抓出來
-        權益總計 = data.get3(name='權益總計', n=1, start=date)
-        權益總額 = data.get3(name='權益總額', n=1, start=date)
+        權益總計 = super().get3(name='權益總計', n=1, start=date)
+        權益總額 = super().get3(name='權益總額', n=1, start=date)
 
         # 並且把它們合併起來
         權益總計.fillna(權益總額, inplace=True)
 
         股東權益報酬率 = ((稅後淨利.iloc[-4:].sum()) / 權益總計.iloc[-1]) * 100
 
-        營業利益 = data.get3(name='營業利益（損失）', n=9, start=date)
-        Revenue_Season = data.get3(name='營業收入合計', n=9, start=date)
+        營業利益 = super().get3(name='營業利益（損失）', n=9, start=date)
+        Revenue_Season = super().get3(name='營業收入合計', n=9, start=date)
         營業利益率 = 營業利益 / Revenue_Season
         前季營業利益率 = 營業利益.shift(1) / Revenue_Season.shift(1)
         營業利益年成長率 = (營業利益率.iloc[-1] / 營業利益率.iloc[-5] - 1) * 100
         八季營益率變化 = (營業利益率 / 前季營業利益率 - 1) * 100
         八季營益率變化 = 八季營益率變化.dropna(axis=1, how="all").dropna(how="all")
 
-        當月營收 = data.get3(name='當月營收', n=12, start=date) * 1000
+        當月營收 = super().get3(name='當月營收', n=12, start=date) * 1000
         年營收 = 當月營收.iloc[-12:].sum()
         市值營收比 = 市值 / 年營收
 
-        MR_YearGrowth = data.get3(name='去年同月增減(%)', n=12, start=date)
+        MR_YearGrowth = super().get3(name='去年同月增減(%)', n=12, start=date)
         短期營收年增 = MR_YearGrowth.rolling(3).mean().reindex(index=MR_YearGrowth.index).iloc[-1]
         長期營收年增 = MR_YearGrowth.rolling(12).mean().reindex(index=MR_YearGrowth.index).iloc[-1]
 
@@ -990,8 +998,8 @@ class SelectStock():
         短期淨利年增 = 稅後淨利年增.iloc[-1]
         長期淨利年增 = 稅後淨利年增[-4:].mean()
 
-        INV = data.get3(name="存貨", n=3, start=date)
-        OC = data.get3(name="營業成本合計", n=2, start=date)
+        INV = super().get3(name="存貨", n=3, start=date)
+        OC = super().get3(name="營業成本合計", n=2, start=date)
         存貨周轉率 = OC.iloc[-1] / ((INV.iloc[-1] + INV.iloc[-2]) / 2) * 4
         前季存貨周轉率 = OC.iloc[-2] / ((INV.iloc[-2] + INV.iloc[-3]) / 2) * 4
         存貨周轉變化率 = (存貨周轉率 - 前季存貨周轉率) / 前季存貨周轉率 * 100
@@ -1051,8 +1059,8 @@ class SelectStock():
             print('Backtest stop, weight should be "average" or "price", find', weight, 'instead')
 
         # get price data in order backtest
-        data.date = end_date
-        price = data.get('收盤價', (end_date - start_date).days)
+        self.date = end_date
+        price = super().get('收盤價', (end_date - start_date).days)
         # start from 1 TWD at start_date,
         end = 1
         date = start_date
@@ -1106,7 +1114,7 @@ class SelectStock():
 
             stock_list = []
             # select stocks at date
-            data.date = sdate
+            self.date = sdate
             # https://stackoverflow.com/questions/39137506/map-to-list-error-series-object-not-callable
             stocks = self.mystrategy(sdate, cond, bool)
             # Idx = stocks.index
