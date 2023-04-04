@@ -491,6 +491,7 @@ def crawl_monthly_report(date):
         column_index = df.index[(df[0] == '公司代號')][0]
         df.columns = df.iloc[column_index]
 
+    df.columns = df.columns.str.replace(" ", "")
     df['當月營收'] = pd.to_numeric(df['當月營收'], 'coerce')
     df = df[~df['當月營收'].isnull()]
     df = df[df['公司代號'] != '合計']
@@ -587,9 +588,6 @@ def crawl_finance_statement2019(year, season):
         else:
             os.remove(os.path.join(path, fold))
             
-
-
-
 
 def crawl_finance_statement(year, season, stock_ids):
 
@@ -729,10 +727,10 @@ def table_exist(conn, table):
     
 def table_latest_date(conn, table):
     # 在sql中以倒序方式排列
-    cursor = conn.execute('SELECT DISTINCT date FROM ' + table + ' ORDER BY date DESC LIMIT 1;')
+    cursor1 = conn.execute('SELECT date FROM ' + table + ' WHERE stock_id = "2330" ORDER BY date DESC LIMIT 1;')
     # 取得第0藍的表格，取第0列第1個元素轉換成文字，格視為'%Y-%m-%d %H:%M:%S'
     # 在class5與 class6有簡易測試
-    return datetime.datetime.strptime(list(cursor)[0][0], '%Y-%m-%d %H:%M:%S') 
+    return datetime.datetime.strptime(list(cursor1)[0][0], '%Y-%m-%d %H:%M:%S')
 
 def table_earliest_date(conn, table):
     cursor = conn.execute('SELECT date FROM ' + table + ' ORDER BY date ASC LIMIT 1;')
@@ -768,7 +766,7 @@ def add_to_sql(conn, name, df):
     exist = table_exist(conn, name)
     start_date = df.index.get_level_values(1).drop_duplicates().sort_values()[0]
     end_date = df.index.get_level_values(1).drop_duplicates().sort_values()[-1]
-    ret = pd.read_sql('SELECT * FROM ' + name + ' WHERE date BETWEEN "{}" AND "{}" '.format(start_date, end_date), conn,
+    ret = pd.read_sql('SELECT * FROM ' + name + ' INDEXED BY ix_{}_stock_id_date WHERE date BETWEEN "{}" AND "{}" '.format(name, start_date, end_date), conn,
                       index_col=['stock_id', 'date']) if exist else pd.DataFrame()
     ret = ret.sort_index(ascending=False)
 
@@ -789,7 +787,7 @@ def add_to_sql(conn, name, df):
         # for date in ret.index.get_level_values(1).drop_duplicates():
         start = ret.index.get_level_values(1).drop_duplicates().sort_values(ascending=True)[0]
         end = ret.index.get_level_values(1).drop_duplicates().sort_values(ascending=True)[-1]
-        conn.execute('DELETE FROM ' + name + ' WHERE date BETWEEN "{}" AND "{}"'.format(start, end))
+        conn.execute('DELETE FROM ' + name + ' INDEXED BY ix_{}_stock_id_date WHERE date BETWEEN "{}" AND "{}"'.format(name, start, end))
         conn.commit()
         ret.to_sql(name, conn, if_exists='append')
     except:
@@ -799,7 +797,7 @@ def add_to_sql(conn, name, df):
 
         start = ret.index.get_level_values(1).drop_duplicates().sort_values(ascending=True)[0]
         end = ret.index.get_level_values(1).drop_duplicates().sort_values(ascending=True)[-1]
-        conn.execute('DELETE FROM ' + name + ' WHERE date BETWEEN "{}" AND "{}"'.format(start, end))
+        conn.execute('DELETE FROM ' + name + ' INDEXED BY ix_{}_stock_id_date WHERE date BETWEEN "{}" AND "{}"'.format(name, start, end))
         conn.commit()
 
         ret.to_sql(name, conn, if_exists='append')

@@ -1,19 +1,26 @@
 import time
-from tkinter import Tk, Button, Label, StringVar, W,E,N,S, Frame, BooleanVar, Checkbutton
-from tkinter import ttk, filedialog, scrolledtext, WORD, INSERT
+from tkinter import Tk, Button, Label, StringVar, W,E,N,S, Frame, BooleanVar, Checkbutton, CENTER, NO, BOTTOM
+from tkinter import ttk, scrolledtext, WORD, INSERT, filedialog
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.pylab import mpl
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+import matplotlib.ticker as mticker
+
 import TW_ScrapperModule as scpr
 import os
 from datetime import datetime
 from openpyxl import load_workbook
 
 # https://www.delftstack.com/zh-tw/howto/python-tkinter/how-to-switch-frames-in-tkinter/
-class SampleApp(Tk):
+class SockApp(Tk):
     def __init__(self):
         Tk.__init__(self)
         self.title("TW STOCK")
         self.configure(background="light yellow")
-        self.geometry("850x580")
-        self.resizable(height=False, width=False)
+        self.geometry("960x680")
+        # self.resizable(height=False, width=False)
         self._frame = None
         self.switch_frame(StartPage)
 
@@ -48,7 +55,8 @@ class StartPage(Frame):
         Button(self, text="Go to Seasonal Report Scrapper", command=lambda: master.switch_frame(S_Scrapper)).grid(row=2, column=1)
         Button(self, text="Go to Price Scrapper", command=lambda: master.switch_frame(Price_Scrapper)).grid(row=3, column=1)
         Button(self, text="Go to Financial Statement Analysis", command=lambda: master.switch_frame(Page_FSAnalysis)).grid(row=4, column=1)
-        Button(self, text="Go to Select Stock app", command=lambda: master.switch_frame(Page_SelectStock)).grid(row=5, column=1)
+        Button(self, text="Go to Select Stock App", command=lambda: master.switch_frame(Page_SelectStock)).grid(row=5, column=1)
+        Button(self, text="Go to Select Stock Analysis App", command=lambda: master.switch_frame(Page_StockAnalysis)).grid(row=6, column=1)
 
     # 取得樣板檔案位置
     def getdbpath(self):
@@ -396,7 +404,7 @@ class Page_FSAnalysis(Frame):
             else:
                 File_path = list_dict[id]
 
-            FSA = scpr.TW_FinancialAnalysis(File_path)
+            FSA = scpr.FinancialAnalysis(File_path)
 
             try:
                 if exec == "all":
@@ -424,7 +432,6 @@ class Page_FSAnalysis(Frame):
                     self.scrolltxt.insert(INSERT, "完成更新 {} 的 股東占比\n".format(id))
                     self.update()
                     self.after(1000)
-
                 elif exec == "更新月報":
                     FSA.Update_Monthly_report(id, path=File_path)
                     self.scrolltxt.insert(INSERT, "完成更新 {} 的 月報\n".format(id))
@@ -438,7 +445,6 @@ class Page_FSAnalysis(Frame):
                     self.scrolltxt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
                     self.update()
                     self.after(1000)
-
                 elif exec == "更新季報":
                     FSA.Update_Season_report(id, path=File_path)
                     self.scrolltxt.insert(INSERT, "完成更新 {} 的 季報\n".format(id))
@@ -456,7 +462,6 @@ class Page_FSAnalysis(Frame):
                     self.scrolltxt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
                     self.update()
                     self.after(1000)
-
                 elif exec == "更新PER與今日價位":
                     FSA.Update_PRICEToday(id, path=File_path)
                     self.scrolltxt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
@@ -466,7 +471,6 @@ class Page_FSAnalysis(Frame):
                     self.scrolltxt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
                     self.update()
                     self.after(1000)
-
                 elif exec == "更新股東占比":
                     FSA.Update_PRICEToday(id, path=File_path)
                     self.scrolltxt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
@@ -480,13 +484,13 @@ class Page_FSAnalysis(Frame):
                     self.scrolltxt.insert(INSERT, "完成更新 {} 的 股東占比\n".format(id))
                     self.update()
                     self.after(1000)
-
                 else:
                     self.scrolltxt.insert(INSERT, "輸入有誤\n")
-
                 self.scrolltxt.insert(INSERT, "完成\n")
-            except:
-                self.scrolltxt.insert(INSERT, "{}發生問題，可能是資料庫有誤\n".format(id))
+
+            except Exception as e:
+                self.scrolltxt.insert(INSERT, "{}發生問題，問題原因: {}\n".format(id, e))
+                print("{}發生問題，問題原因: {}\n".format(id, e))
 
 
         path = self.tplt_path_text.get()
@@ -565,6 +569,7 @@ class Page_SelectStock(Frame):
         self.path_lbl = Label(self, text="資料夾路徑: ", background="pink", font=("TkDefaultFont", 16))
         self.path_lbl.grid(row=1, column=0, sticky=W + E + N + S)
         self.path_text = StringVar()
+
         if not scpr.get_path_sql("SSdirectory"):
             self.path = os.path.abspath('')
         else:
@@ -1136,6 +1141,202 @@ class Page_SelectStock(Frame):
                 self.update()
                 self.after(1000)
 
-root = SampleApp()
+class Page_StockAnalysis(Frame):
+    def __init__(self, master):
+        Frame.__init__(self, master)
+        Frame.configure(self, bg='pink')
+        self.data_getter = scpr.TW_FinanceGet()
+        self.prev_id = ""
+
+        self.StockID_label = Label(self, text="分析股票代號: ", background="pink", font=("TkDefaultFont", 16))
+        self.StockID_label.grid(row=0, column=0, columnspan=3, sticky=W)
+        self.StockID_combo = ttk.Combobox(self, postcommand="", values=["2330", "0050"])
+        self.StockID_combo.current(0)
+        self.StockID_combo.grid(row=0, column=3, columnspan=3, sticky=W)
+
+        self.back_btn = Button(self, text="Go back", command=lambda: master.switch_frame(StartPage))
+        self.back_btn.grid(row=1, column=0, sticky=W)
+        self.Mreport_btn = Button(self, text="月財報", command=lambda: [self.initial_data(),
+                                                                     self.show_table(self.month_df),
+                                                                     self.createWidget(self.month_fig)])
+        self.Mreport_btn.grid(row=1, column=1, sticky=W)
+        self.Sreport_btn = Button(self, text="季財報", command=lambda: [self.initial_data(),
+                                                                     self.show_table(self.season_df),
+                                                                     self.createWidget(self.season_fig, x=0, y=4, xs=5)
+                                                                     ])
+        self.Sreport_btn.grid(row=1, column=2, sticky=W)
+        self.Cash_btn = Button(self, text="現金流", command=lambda: [self.initial_data(),
+                                                                     self.show_table(self.cash_df)
+                                                                     ])
+        self.Cash_btn.grid(row=1, column=3, sticky=W)
+        self.Price_btn = Button(self, text="價位分析", command=lambda: [self.initial_data(),
+                                                                      self.show_table(self.est_price),
+                                                                      self.createWidget(self.month_fig)
+                                                                     ])
+        self.Price_btn.grid(row=1, column=4, sticky=W)
+        self.exit_btn = Button(self, text="Exit", command=self.quit)
+        self.exit_btn.grid(row=1, column=5, sticky=W)
+
+    def initial_data(self):
+        id = self.StockID_combo.get()
+        if self.prev_id != id:
+            # 月財報
+            month_setting = {
+                "title": "股價/月營收年增",
+                "main": ["股價"],
+                "sub": ["月營收年增率3個月移動平均", "月營收年增率12個月移動平均"],
+                "xlabel": ["日期"],
+                "ylabel": ["價位", "增幅(%)"],
+            }
+            self.month_df = self.data_getter.Month_data(id)
+            fig, setting = self.data_getter.module_data_to_draw(id, month_setting)
+            self.month_fig = self.draw_figure(fig, setting)
+
+            # 季財報
+            self.season_df = self.data_getter.Season_data(id)
+            self.season_fig = self.draw_figures()
+
+            # 現金流
+            self.cash_df = self.data_getter.Cash_data(id)
+
+            # 預估股價
+            self.est_price = self.data_getter.Price_estimation(id)
+
+            # 記錄此次分析股票代號
+            self.prev_id = self.StockID_combo.get()
+
+    def createWidget(self, figure, x=7, y=2, xs=1, ys=1, s=W+E+N+S, tool=True):
+        self.canvas = FigureCanvasTkAgg(figure, self)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().grid(row=y, column=x, sticky=s, rowspan=ys, columnspan=xs)
+
+        # 把matplotlib繪製圖形的導航工具欄顯示到tkinter視窗上
+        if tool:
+            toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
+            toolbar.grid(row=y+1, column=x, sticky=W+E)
+            # self.canvas._tkcanvas.grid(row=y-1, column=x, sticky=s)
+
+    def draw_figure(self, df, setting):
+        """建立繪圖物件"""
+
+        # 設定中文顯示字型
+        mpl.rcParams['font.sans-serif'] = ['Microsoft JhengHei']  # 中文顯示
+        mpl.rcParams['axes.unicode_minus'] = False  # 負號顯示
+
+        # 建立繪圖物件f figsize的單位是英寸 畫素 = 英寸*解析度
+        figure = plt.figure(num=1, figsize=(10, 10), dpi=90, facecolor="pink", edgecolor='green', frameon=True)
+
+        # 建立一副子圖
+        fig, ax1 = plt.subplots(figsize=(4, 4), constrained_layout=False)  # 三個引數，依次是：行，列，當前索引
+        plt.subplots_adjust(left=0.1, right=0.9, bottom=0.15, top=0.9)
+
+        secondary_y = False
+        x = df.index
+        color_list = ["red", "green", "blue", "pink", "orange"]
+        for col_name, color in zip(df.columns, color_list):
+            axis = col_name.split("*")
+            if axis[0] == "m":
+                ax1.plot(x, df[col_name], color=color, label=axis[1])
+            else:
+                if not secondary_y:
+                    ax2 = ax1.twinx()
+                ax2.plot(x, df[col_name], color=color, label=axis[1], linestyle="--")
+                secondary_y = True
+
+        ax1.set_title(setting.get("title", ""), loc='center', pad=5, fontsize='large', color='red')  # 設定標題
+        # 定義legend 重新定義了一次label
+        line, label = ax1.get_legend_handles_labels()
+
+        # ,fontsize='xx-large'
+        ax1.set_xlabel(setting.get("xlabel", [""])[0])  # 確定座標軸標題
+        ax1.xaxis.set_label_coords(0, -0.05)
+        tick_spacing = x.size / 10  # x軸密集度
+        ax1.xaxis.set_major_locator(mticker.MultipleLocator(tick_spacing))
+        ax1.tick_params('x', labelrotation=70)
+
+        ax1.set_ylabel(setting.get("ylabel", [""])[0], rotation=0)
+        ax1.yaxis.set_label_coords(0, 1.02)
+
+        if secondary_y:
+            ax2.set_ylabel(setting.get("ylabel", ["", ""])[1], rotation=0)
+            ax2.yaxis.set_label_coords(1, 1.05)
+            line2, label2 = ax2.get_legend_handles_labels()
+            line += line2
+            label += label2
+
+        ax1.grid(which='major', axis='x', color='gray', linestyle='-', linewidth=0.5, alpha=0.2)  # 設定網格
+        ax1.invert_xaxis()
+        ax1.legend(line, label, loc=0)
+
+        return fig
+
+    def draw_figures(self):
+        """建立繪圖物件"""
+        # 設定中文顯示字型
+        mpl.rcParams['font.sans-serif'] = ['Microsoft JhengHei']  # 中文顯示
+        mpl.rcParams['axes.unicode_minus'] = False  # 負號顯示
+
+        figure = plt.figure(num=8, figsize=(5, 2), dpi=80, facecolor="gold", edgecolor='green', frameon=True)
+        draw_df = self.season_df.set_index("項目").loc[[
+            "營業利益率", "應收帳款週轉率", "存貨周轉率", "存貨營收比",
+            "股東權益報酬率(年預估)", "稅後淨利率(累計)", "總資產週轉率(次/年)", "權益係數"]]
+
+        nrows, ncols = 2, 4
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols)
+        count = 0
+        for r in range(nrows):
+            for c in range(ncols):
+                df = draw_df.iloc[count]
+                df.plot(ax=axes[r, c])
+                axes[r, c].set_title(df.name, loc='center', color='red', pad=5)
+                axes[r, c].invert_xaxis()
+                count += 1
+
+        # plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=None)
+        # fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=None)
+
+        return fig
+
+    def show_table(self, df):
+        def fixed_map(option):
+            return [elm for elm in style.map('Treeview', query_opt=option) if
+                    elm[:2] != ('!disabled', '!selected')]
+        style = ttk.Style()
+        style.map('Treeview', foreground=fixed_map('foreground'), background=fixed_map('background'))
+
+        self.data_table = ttk.Treeview(self, columns=("Tags"), height=15)
+        self.data_table.grid(row=2, column=0, columnspan=5, sticky=W+E)
+
+        vsb = ttk.Scrollbar(self, orient="vertical", command=self.data_table.yview)
+        vsb.grid(column=6, row=2, rowspan=2, sticky=N+S)
+        hsb = ttk.Scrollbar(self, orient="horizontal", command=self.data_table.xview)
+        hsb.grid(column=0, row=3, columnspan=5, sticky=W+E)
+        self.data_table.configure(yscrollcommand=vsb.set)
+        self.data_table.configure(xscrollcommand=hsb.set)
+
+        self.data_table.column("#0", width=0, stretch=NO)
+        self.data_table.heading("#0", text="", anchor=CENTER)
+
+        df_col = df.columns.values
+        df_row = df.index.values
+        counter = len(df_col)
+        self.data_table['columns'] = tuple(df_col)
+
+        # 建立欄位名
+        for n in range(counter):
+            title = df_col[n]
+            self.data_table.column(title, width=55, stretch=NO, anchor=CENTER)
+            self.data_table.heading(title, text=title, anchor=CENTER)
+
+        # 建立數值至表格中
+        self.data_table.tag_configure('highlight', background='#DD99FF')
+        for m in range(len(df_row)):
+            value = tuple(df.iloc[m].replace(['NaN', 'nan', np.nan], "").tolist())
+            if value[0][0] == "*":
+                self.data_table.insert(parent='', index='end', text='', values=value, tag='highlight', open=False)
+            else:
+                self.data_table.insert(parent='', index='end', text='', values=value)
+
+root = SockApp()
 
 root.mainloop()
