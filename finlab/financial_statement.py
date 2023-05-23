@@ -197,7 +197,7 @@ def combine(d):
 
     for i, dfs in d.items():
         for tname in tnames:
-            tbs[tname] = tbs[tname].append(dfs[tname])
+            tbs[tname] = tbs[tname].append(dfs[tname].astype("float32"))
             print("新增表: ", tname, "\n")
             print("原始內容: ", dfs[tname], "\n")
             print("新增內容: ", tbs[tname], "\n")
