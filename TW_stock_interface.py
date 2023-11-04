@@ -1,17 +1,18 @@
+import os
 import time
-from tkinter import Tk, Button, Label, StringVar, W,E,N,S, Frame, BooleanVar, Checkbutton, CENTER, NO, BOTTOM
+from datetime import datetime
+from tkinter import Tk, Button, Label, StringVar, W, E, N, S, Frame, BooleanVar, Checkbutton, CENTER, NO
 from tkinter import ttk, scrolledtext, WORD, INSERT, filedialog
 
-import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.pylab import mpl
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import matplotlib.ticker as mticker
+import numpy as np
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.pylab import mpl
+from openpyxl import load_workbook
 
 import TW_ScrapperModule as scpr
-import os
-from datetime import datetime
-from openpyxl import load_workbook
+
 
 # https://www.delftstack.com/zh-tw/howto/python-tkinter/how-to-switch-frames-in-tkinter/
 class SockApp(Tk):
@@ -30,6 +31,7 @@ class SockApp(Tk):
             self._frame.destroy()
         self._frame = new_frame
         self._frame.pack()
+
 
 class StartPage(Frame):
     def __init__(self, master):
@@ -51,12 +53,18 @@ class StartPage(Frame):
         self.db_path_btn = Button(self, text='請選擇檔案', command=self.getdbpath)
         self.db_path_btn.grid(row=0, column=4, sticky=W + E + N + S)
 
-        Button(self, text="Go to Monthly Report Scrapper", command=lambda: master.switch_frame(M_Scrapper)).grid(row=1, column=1)
-        Button(self, text="Go to Seasonal Report Scrapper", command=lambda: master.switch_frame(S_Scrapper)).grid(row=2, column=1)
-        Button(self, text="Go to Price Scrapper", command=lambda: master.switch_frame(Price_Scrapper)).grid(row=3, column=1)
-        Button(self, text="Go to Financial Statement Analysis", command=lambda: master.switch_frame(Page_FSAnalysis)).grid(row=4, column=1)
-        Button(self, text="Go to Select Stock App", command=lambda: master.switch_frame(Page_SelectStock)).grid(row=5, column=1)
-        Button(self, text="Go to Select Stock Analysis App", command=lambda: master.switch_frame(Page_StockAnalysis)).grid(row=6, column=1)
+        Button(self, text="Go to Monthly Report Scrapper", command=lambda: master.switch_frame(M_Scrapper)).grid(row=1,
+                                                                                                                 column=1)
+        Button(self, text="Go to Seasonal Report Scrapper", command=lambda: master.switch_frame(S_Scrapper)).grid(row=2,
+                                                                                                                  column=1)
+        Button(self, text="Go to Price Scrapper", command=lambda: master.switch_frame(Price_Scrapper)).grid(row=3,
+                                                                                                            column=1)
+        Button(self, text="Go to Financial Statement Analysis",
+               command=lambda: master.switch_frame(Page_FSAnalysis)).grid(row=4, column=1)
+        Button(self, text="Go to Select Stock App", command=lambda: master.switch_frame(Page_SelectStock)).grid(row=5,
+                                                                                                                column=1)
+        Button(self, text="Go to Select Stock Analysis App",
+               command=lambda: master.switch_frame(Page_StockAnalysis)).grid(row=6, column=1)
 
     # 取得樣板檔案位置
     def getdbpath(self):
@@ -71,6 +79,7 @@ class StartPage(Frame):
         self.db_path_Entry.insert(0, filename)
         scpr.save_path_sql(filename)
 
+
 class M_Scrapper(Frame):
     def __init__(self, master):
         Frame.__init__(self, master)
@@ -82,13 +91,13 @@ class M_Scrapper(Frame):
         self.Frdate_label = Label(self, text="From: ", background="pink", font=("TkDefaultFont", 16))
         self.Frdate_label.grid(row=1, column=0, sticky=W)
         self.Frdate_combo = ttk.Combobox(self, postcommand=lambda: self.Frdate_combo.configure(
-                                             values=scpr.date_func(table="monthly_revenue", type="F")))
+            values=scpr.date_func(table="monthly_revenue", type="F")))
         self.Frdate_combo.grid(row=1, column=1, sticky=W)
 
         self.Todate_label = Label(self, text="To: ", background="pink", font=("TkDefaultFont", 16))
         self.Todate_label.grid(row=1, column=2, sticky=W)
         self.Todate_combo = ttk.Combobox(self, postcommand=lambda: self.Todate_combo.configure(
-                                             values=scpr.date_func(table="monthly_revenue", type="T")))
+            values=scpr.date_func(table="monthly_revenue", type="T")))
         self.Todate_combo.grid(row=1, column=3, sticky=W)
 
         self.Execution_btn = Button(self, text="Execute", comman=self.execute_func)
@@ -96,7 +105,7 @@ class M_Scrapper(Frame):
 
         # 顯示更新動作進度
         self.scrolltxt = scrolledtext.ScrolledText(self, wrap=WORD, height=16, width=40)
-        self.scrolltxt.grid(row=2, column=0, columnspan=5, sticky=W+E+N+S, padx=20, pady=30)
+        self.scrolltxt.grid(row=2, column=0, columnspan=5, sticky=W + E + N + S, padx=20, pady=30)
 
         # 返回主頁面、更新、清除、離開程式
         # Label(self, text="Page one", font=('Helvetica', 18, "bold")).pack(side="top", fill="x", pady=5)
@@ -145,24 +154,26 @@ class M_Scrapper(Frame):
         self.Frdate_combo.delete(0, "end")
         self.Todate_combo.delete(0, "end")
 
+
 class S_Scrapper(Frame):
     def __init__(self, master):
         Frame.__init__(self, master)
         Frame.configure(self, bg='pink')
 
         # 選擇要爬取的資料型態
-        self.title_label = Label(self, text="季報爬取 (時間須包含季報發表的日期): ", background="pink", font=("TkDefaultFont", 16))
+        self.title_label = Label(self, text="季報爬取 (時間須包含季報發表的日期): ", background="pink",
+                                 font=("TkDefaultFont", 16))
         self.title_label.grid(row=0, column=0, columnspan=4, sticky=W)
         self.Frdate_label = Label(self, text="From: ", background="pink", font=("TkDefaultFont", 16))
         self.Frdate_label.grid(row=1, column=0, sticky=W)
         self.Frdate_combo = ttk.Combobox(self, postcommand=lambda: self.Frdate_combo.configure(
-                                                            values=scpr.date_func(table="balance_sheet", type="F")))
+            values=scpr.date_func(table="balance_sheet", type="F")))
         self.Frdate_combo.grid(row=1, column=1, sticky=W)
 
         self.Todate_label = Label(self, text="To: ", background="pink", font=("TkDefaultFont", 16))
         self.Todate_label.grid(row=1, column=2, sticky=W)
         self.Todate_combo = ttk.Combobox(self, postcommand=lambda: self.Todate_combo.configure(
-                                                            values=scpr.date_func(table="balance_sheet", type="T")))
+            values=scpr.date_func(table="balance_sheet", type="T")))
         self.Todate_combo.grid(row=1, column=3, sticky=W)
 
         self.Execution_btn = Button(self, text="Execute", comman=self.execute_func)
@@ -170,7 +181,7 @@ class S_Scrapper(Frame):
 
         # 顯示更新動作進度
         self.scrolltxt = scrolledtext.ScrolledText(self, wrap=WORD, height=16, width=40)
-        self.scrolltxt.grid(row=2, column=0, columnspan=5, sticky=W+E+N+S, padx=20, pady=30)
+        self.scrolltxt.grid(row=2, column=0, columnspan=5, sticky=W + E + N + S, padx=20, pady=30)
 
         # 返回主頁面、更新、清除、離開程式
         # Label(self, text="Page one", font=('Helvetica', 18, "bold")).pack(side="top", fill="x", pady=5)
@@ -218,6 +229,7 @@ class S_Scrapper(Frame):
         self.Frdate_combo.delete(0, "end")
         self.Todate_combo.delete(0, "end")
 
+
 class Price_Scrapper(Frame):
     def __init__(self, master):
         Frame.__init__(self, master)
@@ -229,13 +241,13 @@ class Price_Scrapper(Frame):
         self.Frdate_label = Label(self, text="From: ", background="pink", font=("TkDefaultFont", 16))
         self.Frdate_label.grid(row=1, column=0, sticky=W)
         self.Frdate_combo = ttk.Combobox(self, postcommand=lambda: self.Frdate_combo.configure(
-                                             values=scpr.date_func(table="price", type="F")))
+            values=scpr.date_func(table="price", type="F")))
         self.Frdate_combo.grid(row=1, column=1, sticky=W)
 
         self.Todate_label = Label(self, text="To: ", background="pink", font=("TkDefaultFont", 16))
         self.Todate_label.grid(row=1, column=2, sticky=W)
         self.Todate_combo = ttk.Combobox(self, postcommand=lambda: self.Todate_combo.configure(
-                                             values=scpr.date_func(table="price", type="T")))
+            values=scpr.date_func(table="price", type="T")))
         self.Todate_combo.grid(row=1, column=3, sticky=W)
 
         self.Execution_btn = Button(self, text="Execute", comman=self.execute_func)
@@ -243,7 +255,7 @@ class Price_Scrapper(Frame):
 
         # 顯示更新動作進度
         self.scrolltxt = scrolledtext.ScrolledText(self, wrap=WORD, height=16, width=40)
-        self.scrolltxt.grid(row=2, column=0, columnspan=5, sticky=W+E+N+S, padx=20, pady=30)
+        self.scrolltxt.grid(row=2, column=0, columnspan=5, sticky=W + E + N + S, padx=20, pady=30)
 
         # 返回主頁面、更新、清除、離開程式
         # Label(self, text="Page one", font=('Helvetica', 18, "bold")).pack(side="top", fill="x", pady=5)
@@ -291,6 +303,7 @@ class Price_Scrapper(Frame):
         self.Frdate_combo.delete(0, "end")
         self.Todate_combo.delete(0, "end")
 
+
 class Page_FSAnalysis(Frame):
     def __init__(self, master):
         Frame.__init__(self, master)
@@ -306,7 +319,8 @@ class Page_FSAnalysis(Frame):
             self.tplt_path = scpr.get_path_sql("file")[-1]
         self.tplt_path_text.set(self.tplt_path)
         self.tplt_path_combo = ttk.Combobox(self, width=70, textvariable=self.tplt_path_text,
-                                            postcommand=lambda: self.tplt_path_combo.configure(values=scpr.get_path_sql("file")))
+                                            postcommand=lambda: self.tplt_path_combo.configure(
+                                                values=scpr.get_path_sql("file")))
         self.tplt_path_combo.grid(row=0, column=1, columnspan=3, sticky=W + E + N + S)
         self.tplt_path_btn = Button(self, text='請選擇檔案', command=self.gettpltpath)
         self.tplt_path_btn.grid(row=0, column=4, sticky=W + E + N + S)
@@ -323,7 +337,8 @@ class Page_FSAnalysis(Frame):
             self.path = scpr.get_path_sql("directory")[-1]
         self.path_text.set(self.path)
         self.path_combo = ttk.Combobox(self, width=70, textvariable=self.path_text,
-                                       postcommand=lambda: self.path_combo.configure(values=scpr.get_path_sql("directory")))
+                                       postcommand=lambda: self.path_combo.configure(
+                                           values=scpr.get_path_sql("directory")))
         self.path_combo.grid(row=1, column=1, columnspan=3, sticky=W + E + N + S)
         self.path_btn = Button(self, text='請選擇檔案', command=self.getpath)
         self.path_btn.grid(row=1, column=4, sticky=W + E + N + S)
@@ -343,14 +358,15 @@ class Page_FSAnalysis(Frame):
         # 選擇要執行的項目
         self.exec_label = Label(self, text="執行項目: ", background="pink", font=("TkDefaultFont", 16))
         self.exec_label.grid(row=3, column=0, sticky=W)
-        self.exec_combo = ttk.Combobox(self, values=["all", "更新月報", "更新季報", "更新PER與今日價位", "更新股東占比"])
+        self.exec_combo = ttk.Combobox(self,
+                                       values=["all", "更新月報", "更新季報", "更新PER與今日價位", "更新股東占比"])
         self.exec_combo.grid(row=3, column=1, sticky=W)
         self.Execution_btn = Button(self, text="Execute", comman=self.execute_func)
         self.Execution_btn.grid(row=3, column=2, sticky=W)
 
         # 顯示更新動作進度
         self.scrolltxt = scrolledtext.ScrolledText(self, wrap=WORD, height=16, width=40)
-        self.scrolltxt.grid(row=4, column=0, columnspan=5, sticky=W+E+N+S, padx=20, pady=30)
+        self.scrolltxt.grid(row=4, column=0, columnspan=5, sticky=W + E + N + S, padx=20, pady=30)
 
         # 返回主頁面、更新、清除、離開程式
         self.back_btn = Button(self, text="Go back", command=lambda: master.switch_frame(StartPage))
@@ -492,7 +508,6 @@ class Page_FSAnalysis(Frame):
                 self.scrolltxt.insert(INSERT, "{}發生問題，問題原因: {}\n".format(id, e))
                 print("{}發生問題，問題原因: {}\n".format(id, e))
 
-
         path = self.tplt_path_text.get()
         directory = self.path_text.get()
         scpr.save_path_sql(path)
@@ -539,6 +554,7 @@ class Page_FSAnalysis(Frame):
         new_path = os.path.join(folder, "O_" + ID + "_財報分析.xlsx")
         wb.save(new_path)
 
+
 class Page_SelectStock(Frame):
     def __init__(self, master):
         Frame.__init__(self, master)
@@ -558,7 +574,8 @@ class Page_SelectStock(Frame):
             self.tplt_path = scpr.get_path_sql("file")[-1]
         self.tplt_path_text.set(self.tplt_path)
         self.tplt_path_combo = ttk.Combobox(self, width=30, textvariable=self.tplt_path_text,
-                                            postcommand=lambda: self.tplt_path_combo.configure(values=scpr.get_path_sql("file")))
+                                            postcommand=lambda: self.tplt_path_combo.configure(
+                                                values=scpr.get_path_sql("file")))
         self.tplt_path_combo.grid(row=0, column=1, columnspan=5, sticky=W + E + N + S)
         self.tplt_path_btn = Button(self, text='請選擇檔案', command=self.gettpltpath)
         self.tplt_path_btn.grid(row=0, column=6, sticky=W + E + N + S)
@@ -576,7 +593,8 @@ class Page_SelectStock(Frame):
             self.path = scpr.get_path_sql("SSdirectory")[-1]
         self.path_text.set(self.path)
         self.path_combo = ttk.Combobox(self, width=30, textvariable=self.path_text,
-                                       postcommand=lambda: self.path_combo.configure(values=scpr.get_path_sql("SSdirectory")))
+                                       postcommand=lambda: self.path_combo.configure(
+                                           values=scpr.get_path_sql("SSdirectory")))
         self.path_combo.grid(row=1, column=1, columnspan=5, sticky=W + E + N + S)
         self.path_btn = Button(self, text='請選擇檔案', command=self.getpath)
         self.path_btn.grid(row=1, column=6, sticky=W + E + N + S)
@@ -584,10 +602,11 @@ class Page_SelectStock(Frame):
         self.del_path_btn.grid(row=1, column=7, sticky=W + E + N + S)
 
         # 選取欲使用的條件以及其設定值
-        Label(self, text="選股條件:", bg="red", font=("TkDefaultFont", 14)).grid(row=2, column=0, columnspan=6, sticky=W+E)
+        Label(self, text="選股條件:", bg="red", font=("TkDefaultFont", 14)).grid(row=2, column=0, columnspan=6,
+                                                                                 sticky=W + E)
 
         self.start_label = Label(self, text="選股日期:", bg="pink", font=("TkDefaultFont", 12))
-        self.start_label.grid(row=3, column=0, sticky=W+E)
+        self.start_label.grid(row=3, column=0, sticky=W + E)
         self.start_var1 = StringVar()
         self.start = ttk.Entry(self, textvariable=self.start_var1, font=("TkDefaultFont", 12))
         self.start.grid(row=3, column=1, columnspan=3, sticky=W)
@@ -615,7 +634,8 @@ class Page_SelectStock(Frame):
         self.combo2 = ttk.Combobox(self, width=4, values=[">", ">=", "=", "<", "<="])
         self.combo2.grid(row=4, column=4, sticky=W)
         self.chkvar2 = BooleanVar()
-        self.chk2 = Checkbutton(self, variable=self.chkvar2, bg="pink", text="三年自由現金流", font=("TkDefaultFont", 12))
+        self.chk2 = Checkbutton(self, variable=self.chkvar2, bg="pink", text="三年自由現金流",
+                                font=("TkDefaultFont", 12))
         self.chk2.grid(row=4, column=3, sticky=E)
         cache2 = scpr.get_cache_sql("三年自由現金流")
         if not cache2.empty:
@@ -623,14 +643,14 @@ class Page_SelectStock(Frame):
             self.entry2.insert(0, cache2["entry"][0]) if self.chkvar2.get() else self.entry2.delete(0, "end")
             self.combo2.insert(0, cache2["combo"][0]) if self.chkvar2.get() else self.entry2.delete(0, "end")
 
-
         self.entry_var3 = StringVar()
         self.entry3 = ttk.Entry(self, textvariable=self.entry_var3, width=15, font=("TkDefaultFont", 12))
         self.entry3.grid(row=5, column=2, sticky=W)
         self.combo3 = ttk.Combobox(self, width=4, values=[">", ">=", "=", "<", "<="])
         self.combo3.grid(row=5, column=1, sticky=W)
         self.chkvar3 = BooleanVar()
-        self.chk3 = Checkbutton(self, variable=self.chkvar3, bg="pink", text="股東權益報酬率", font=("TkDefaultFont", 12))
+        self.chk3 = Checkbutton(self, variable=self.chkvar3, bg="pink", text="股東權益報酬率",
+                                font=("TkDefaultFont", 12))
         self.chk3.grid(row=5, column=0, sticky=E)
         cache3 = scpr.get_cache_sql("股東權益報酬率")
         if not cache3.empty:
@@ -644,7 +664,8 @@ class Page_SelectStock(Frame):
         self.combo4 = ttk.Combobox(self, width=4, values=[">", ">=", "=", "<", "<="])
         self.combo4.grid(row=5, column=4, sticky=W)
         self.chkvar4 = BooleanVar()
-        self.chk4 = Checkbutton(self, variable=self.chkvar4, bg="pink", text="營業利益年成長率", font=("TkDefaultFont", 12))
+        self.chk4 = Checkbutton(self, variable=self.chkvar4, bg="pink", text="營業利益年成長率",
+                                font=("TkDefaultFont", 12))
         self.chk4.grid(row=5, column=3, sticky=E)
         cache4 = scpr.get_cache_sql("營業利益年成長率")
         if not cache4.empty:
@@ -658,7 +679,8 @@ class Page_SelectStock(Frame):
         self.combo5 = ttk.Combobox(self, width=4, values=[">", ">=", "=", "<", "<="])
         self.combo5.grid(row=6, column=1, sticky=W)
         self.chkvar5 = BooleanVar()
-        self.chk5 = Checkbutton(self, variable=self.chkvar5, bg="pink", text="八季營益率變化", font=("TkDefaultFont", 12))
+        self.chk5 = Checkbutton(self, variable=self.chkvar5, bg="pink", text="八季營益率變化",
+                                font=("TkDefaultFont", 12))
         self.chk5.grid(row=6, column=0, sticky=E)
         cache5 = scpr.get_cache_sql("八季營益率變化")
         if not cache5.empty:
@@ -728,7 +750,8 @@ class Page_SelectStock(Frame):
         self.combo10 = ttk.Combobox(self, width=4, values=[">", ">=", "=", "<", "<="])
         self.combo10.grid(row=8, column=4, sticky=W)
         self.chkvar10 = BooleanVar()
-        self.chk10 = Checkbutton(self, variable=self.chkvar10, bg="pink", text="存貨周轉變化率", font=("TkDefaultFont", 12))
+        self.chk10 = Checkbutton(self, variable=self.chkvar10, bg="pink", text="存貨周轉變化率",
+                                 font=("TkDefaultFont", 12))
         self.chk10.grid(row=8, column=3, sticky=E)
         cache10 = scpr.get_cache_sql("存貨周轉變化率")
         if not cache10.empty:
@@ -750,19 +773,19 @@ class Page_SelectStock(Frame):
             self.entry11.insert(0, cache11["entry"][0]) if self.chkvar11.get() else self.entry11.delete(0, "end")
             self.combo11.insert(0, cache11["combo"][0]) if self.chkvar11.get() else self.entry11.delete(0, "end")
 
-
         # 選擇要執行的項目
         self.Execution_btn = Button(self, text="Execute", command=self.execute_func)
-        self.Execution_btn.grid(row=9, column=6, sticky=W+E)
+        self.Execution_btn.grid(row=9, column=6, sticky=W + E)
         self.Save_btn = Button(self, text="Save excel", command=self.save_excel)
-        self.Save_btn.grid(row=9, column=7, sticky=W+E)
+        self.Save_btn.grid(row=9, column=7, sticky=W + E)
 
         # 回測設置
-        Label(self, text="回測設定:", bg="red", font=("TkDefaultFont", 14)).grid(row=10, column=0, columnspan=6, sticky=W+E)
+        Label(self, text="回測設定:", bg="red", font=("TkDefaultFont", 14)).grid(row=10, column=0, columnspan=6,
+                                                                                 sticky=W + E)
 
         # 回測的起始時間
         self.end_label = Label(self, text="回測起始日期:", bg="pink", font=("TkDefaultFont", 12))
-        self.end_label.grid(row=11, column=0, sticky=W+E)
+        self.end_label.grid(row=11, column=0, sticky=W + E)
         self.end_var1 = StringVar()
         self.end = ttk.Entry(self, textvariable=self.end_var1, font=("TkDefaultFont", 12))
         self.end.grid(row=11, column=1, columnspan=2, sticky=W)
@@ -772,7 +795,7 @@ class Page_SelectStock(Frame):
 
         # 多少週期更新一次
         self.period_label = Label(self, text="週期天數:", bg="pink", font=("TkDefaultFont", 12))
-        self.period_label.grid(row=11, column=3, sticky=W+E)
+        self.period_label.grid(row=11, column=3, sticky=W + E)
         self.period_var1 = StringVar()
         self.period = ttk.Entry(self, textvariable=self.period_var1, font=("TkDefaultFont", 12))
         self.period.grid(row=11, column=4, columnspan=2, sticky=W)
@@ -786,7 +809,7 @@ class Page_SelectStock(Frame):
         self.sp_entry.grid(row=12, column=1, columnspan=2, sticky=W)
         self.sp_chkvar = BooleanVar()
         self.sp_chk = Checkbutton(self, variable=self.sp_chkvar, bg="pink", text="停利", font=("TkDefaultFont", 12))
-        self.sp_chk.grid(row=12, column=0, sticky=W+E)
+        self.sp_chk.grid(row=12, column=0, sticky=W + E)
         sp_cache = scpr.get_cache_sql("停利")
         if not sp_cache.empty:
             self.sp_chkvar.set(scpr.get_cache_sql("停利", bool=True))
@@ -798,7 +821,7 @@ class Page_SelectStock(Frame):
         self.sl_entry.grid(row=12, column=4, columnspan=2, sticky=W)
         self.sl_chkvar = BooleanVar()
         self.sl_chk = Checkbutton(self, variable=self.sl_chkvar, bg="pink", text="停損", font=("TkDefaultFont", 12))
-        self.sl_chk.grid(row=12, column=3, sticky=W+E)
+        self.sl_chk.grid(row=12, column=3, sticky=W + E)
         sl_cache = scpr.get_cache_sql("停損")
         if not sl_cache.empty:
             self.sl_chkvar.set(scpr.get_cache_sql("停損", bool=True))
@@ -806,11 +829,11 @@ class Page_SelectStock(Frame):
 
         # 執行回測
         self.backtest_btn = Button(self, text='執行回測', command=self.backtest_func)
-        self.backtest_btn.grid(row=12, column=6, sticky=W+E)
+        self.backtest_btn.grid(row=12, column=6, sticky=W + E)
 
         # 顯示更新動作進度
         self.scrolltxt = scrolledtext.ScrolledText(self, wrap=WORD, height=10, width=20)
-        self.scrolltxt.grid(row=13, column=0, columnspan=6, sticky=W+E+N+S, padx=20, pady=30)
+        self.scrolltxt.grid(row=13, column=0, columnspan=6, sticky=W + E + N + S, padx=20, pady=30)
 
         # 返回主頁面、更新、清除、離開程式
         self.back_btn = Button(self, text="Go back", command=lambda: master.switch_frame(StartPage))
@@ -997,7 +1020,7 @@ class Page_SelectStock(Frame):
         self.after(1000)
 
         for txt in process:
-            self.scrolltxt.insert(INSERT, txt+"\n")
+            self.scrolltxt.insert(INSERT, txt + "\n")
             self.update()
             self.after(1000)
         self.scrolltxt.insert(INSERT, '\n')
@@ -1006,6 +1029,7 @@ class Page_SelectStock(Frame):
         self.scrolltxt.insert(INSERT, '交易利潤 :\n {}\n\n'.format(profit))
         self.scrolltxt.insert(INSERT, '交易紀錄 :\n {}\n\n'.format(record))
         self.scrolltxt.insert(INSERT, "完成\n")
+
     # 顯示作業進度
     def update_func(self):
         cache1 = scpr.get_cache_sql("市值")
@@ -1141,6 +1165,7 @@ class Page_SelectStock(Frame):
                 self.update()
                 self.after(1000)
 
+
 class Page_StockAnalysis(Frame):
     def __init__(self, master):
         Frame.__init__(self, master)
@@ -1157,22 +1182,23 @@ class Page_StockAnalysis(Frame):
         self.back_btn = Button(self, text="Go back", command=lambda: master.switch_frame(StartPage))
         self.back_btn.grid(row=1, column=0, sticky=W)
         self.Mreport_btn = Button(self, text="月財報", command=lambda: [self.initial_data(),
-                                                                     self.show_table(self.month_df),
-                                                                     self.createWidget(self.month_fig)])
+                                                                        self.show_table(self.month_df),
+                                                                        self.createWidget(self.month_fig)])
         self.Mreport_btn.grid(row=1, column=1, sticky=W)
         self.Sreport_btn = Button(self, text="季財報", command=lambda: [self.initial_data(),
-                                                                     self.show_table(self.season_df),
-                                                                     self.createWidget(self.season_fig, x=0, y=4, xs=5)
-                                                                     ])
+                                                                        self.show_table(self.season_df),
+                                                                        self.createWidget(self.season_fig, x=0, y=4,
+                                                                                          xs=5)
+                                                                        ])
         self.Sreport_btn.grid(row=1, column=2, sticky=W)
         self.Cash_btn = Button(self, text="現金流", command=lambda: [self.initial_data(),
                                                                      self.show_table(self.cash_df)
                                                                      ])
         self.Cash_btn.grid(row=1, column=3, sticky=W)
         self.Price_btn = Button(self, text="價位分析", command=lambda: [self.initial_data(),
-                                                                      self.show_table(self.est_price),
-                                                                      self.createWidget(self.month_fig)
-                                                                     ])
+                                                                        self.show_table(self.est_price),
+                                                                        self.createWidget(self.month_fig)
+                                                                        ])
         self.Price_btn.grid(row=1, column=4, sticky=W)
         self.exit_btn = Button(self, text="Exit", command=self.quit)
         self.exit_btn.grid(row=1, column=5, sticky=W)
@@ -1205,7 +1231,7 @@ class Page_StockAnalysis(Frame):
             # 記錄此次分析股票代號
             self.prev_id = self.StockID_combo.get()
 
-    def createWidget(self, figure, x=7, y=2, xs=1, ys=1, s=W+E+N+S, tool=True):
+    def createWidget(self, figure, x=7, y=2, xs=1, ys=1, s=W + E + N + S, tool=True):
         self.canvas = FigureCanvasTkAgg(figure, self)
         self.canvas.draw()
         self.canvas.get_tk_widget().grid(row=y, column=x, sticky=s, rowspan=ys, columnspan=xs)
@@ -1213,7 +1239,7 @@ class Page_StockAnalysis(Frame):
         # 把matplotlib繪製圖形的導航工具欄顯示到tkinter視窗上
         if tool:
             toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
-            toolbar.grid(row=y+1, column=x, sticky=W+E)
+            toolbar.grid(row=y + 1, column=x, sticky=W + E)
             # self.canvas._tkcanvas.grid(row=y-1, column=x, sticky=s)
 
     def draw_figure(self, df, setting):
@@ -1301,16 +1327,17 @@ class Page_StockAnalysis(Frame):
         def fixed_map(option):
             return [elm for elm in style.map('Treeview', query_opt=option) if
                     elm[:2] != ('!disabled', '!selected')]
+
         style = ttk.Style()
         style.map('Treeview', foreground=fixed_map('foreground'), background=fixed_map('background'))
 
         self.data_table = ttk.Treeview(self, columns=("Tags"), height=15)
-        self.data_table.grid(row=2, column=0, columnspan=5, sticky=W+E)
+        self.data_table.grid(row=2, column=0, columnspan=5, sticky=W + E)
 
         vsb = ttk.Scrollbar(self, orient="vertical", command=self.data_table.yview)
-        vsb.grid(column=6, row=2, rowspan=2, sticky=N+S)
+        vsb.grid(column=6, row=2, rowspan=2, sticky=N + S)
         hsb = ttk.Scrollbar(self, orient="horizontal", command=self.data_table.xview)
-        hsb.grid(column=0, row=3, columnspan=5, sticky=W+E)
+        hsb.grid(column=0, row=3, columnspan=5, sticky=W + E)
         self.data_table.configure(yscrollcommand=vsb.set)
         self.data_table.configure(xscrollcommand=hsb.set)
 
@@ -1336,6 +1363,7 @@ class Page_StockAnalysis(Frame):
                 self.data_table.insert(parent='', index='end', text='', values=value, tag='highlight', open=False)
             else:
                 self.data_table.insert(parent='', index='end', text='', values=value)
+
 
 root = SockApp()
 

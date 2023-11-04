@@ -1,22 +1,24 @@
-import pandas as pd
 import datetime
-import time
-from dateutil.relativedelta import relativedelta
+import math
+import operator
 import os
-from io import StringIO
-import sqlite3
-import requests
-import pickle
 import re
+import sqlite3
+import time
+from io import StringIO
 
+import numpy as np
+import pandas as pd
+import requests
+from dateutil.relativedelta import relativedelta
+from matplotlib import pyplot as plt
 from openpyxl import load_workbook
-from openpyxl.styles import Font
 from openpyxl.styles import Alignment
-from openpyxl.styles import PatternFill
 from openpyxl.styles import Border
+from openpyxl.styles import Font
+from openpyxl.styles import PatternFill
 from openpyxl.styles import Side
 
-from finlab.data import Data
 from finlab.crawler import (
     crawl_price,
     crawl_monthly_report,
@@ -28,15 +30,12 @@ from finlab.crawler import (
 
     date_range, month_range, season_range
 )
-
-from matplotlib import pyplot as plt
-import numpy as np
-import math
-import operator
+from finlab.data import Data
 
 # 檢查下載檔案機制有問題
 conn = sqlite3.connect(os.path.join("data", "data.db"))
 data = Data()
+
 
 class TWStockModule(Data):
     def __init__(self):
@@ -47,11 +46,14 @@ class TWStockModule(Data):
         try:
             self.price = pd.read_csv("C:/Users/pat/Desktop/test_data/price.csv", index_col="date", encoding="utf_8_sig")
             self.price.index = pd.to_datetime(self.price.index, format="%Y-%m-%d")
-            self.Revenue_Month = pd.read_csv("C:/Users/pat/Desktop/test_data/Revenue_Month.csv", index_col="date", encoding="utf_8_sig")
+            self.Revenue_Month = pd.read_csv("C:/Users/pat/Desktop/test_data/Revenue_Month.csv", index_col="date",
+                                             encoding="utf_8_sig")
             self.Revenue_Month.index = pd.to_datetime(self.Revenue_Month.index, format="%Y-%m-%d")
-            self.MR_MonthGrowth = pd.read_csv("C:/Users/pat/Desktop/test_data/MR_MonthGrowth.csv", index_col="date", encoding="utf_8_sig")
+            self.MR_MonthGrowth = pd.read_csv("C:/Users/pat/Desktop/test_data/MR_MonthGrowth.csv", index_col="date",
+                                              encoding="utf_8_sig")
             self.MR_MonthGrowth.index = pd.to_datetime(self.MR_MonthGrowth.index, format="%Y-%m-%d")
-            self.MR_YearGrowth = pd.read_csv("C:/Users/pat/Desktop/test_data/MR_YearGrowth.csv", index_col="date", encoding="utf_8_sig")
+            self.MR_YearGrowth = pd.read_csv("C:/Users/pat/Desktop/test_data/MR_YearGrowth.csv", index_col="date",
+                                             encoding="utf_8_sig")
             self.MR_YearGrowth.index = pd.to_datetime(self.MR_YearGrowth.index, format="%Y-%m-%d")
         except:
             self.price = data.get('收盤價', 800)
@@ -60,9 +62,12 @@ class TWStockModule(Data):
             self.MR_YearGrowth = data.get('去年同月增減(%)', 48)
 
             self.price.to_csv("C:/Users/pat/Desktop/test_data/price.csv", index="date", encoding="utf_8_sig")
-            self.Revenue_Month.to_csv("C:/Users/pat/Desktop/test_data/Revenue_Month.csv", index="date", encoding="utf_8_sig")
-            self.MR_MonthGrowth.to_csv("C:/Users/pat/Desktop/test_data/MR_MonthGrowth.csv", index="date", encoding="utf_8_sig")
-            self.MR_YearGrowth.to_csv("C:/Users/pat/Desktop/test_data/MR_YearGrowth.csv", index="date", encoding="utf_8_sig")
+            self.Revenue_Month.to_csv("C:/Users/pat/Desktop/test_data/Revenue_Month.csv", index="date",
+                                      encoding="utf_8_sig")
+            self.MR_MonthGrowth.to_csv("C:/Users/pat/Desktop/test_data/MR_MonthGrowth.csv", index="date",
+                                       encoding="utf_8_sig")
+            self.MR_YearGrowth.to_csv("C:/Users/pat/Desktop/test_data/MR_YearGrowth.csv", index="date",
+                                      encoding="utf_8_sig")
 
         self.Revenue_Season = data.get2('營業收入合計', 16) * 0.00001  # 單位: 億
         # 營業利益率，也可以簡稱營益率，英文Operating Margin或Operating profit Margin
@@ -87,15 +92,15 @@ class TWStockModule(Data):
         self.Shareholders_equity = 權益總計.fillna(權益總額, inplace=False) * 0.00001  # 單位: 億
 
         # Cash Flow for investing
-        self.Cash_Flow_for_investing = data.get2("投資活動之淨現金流入（流出）", 32) * 0.00001 # 單位:億
+        self.Cash_Flow_for_investing = data.get2("投資活動之淨現金流入（流出）", 32) * 0.00001  # 單位:億
         # Operating Cash Flow
-        self.Operating_Cash_Flow = data.get2("營業活動之淨現金流入（流出）", 32) * 0.00001 # 單位:億
+        self.Operating_Cash_Flow = data.get2("營業活動之淨現金流入（流出）", 32) * 0.00001  # 單位:億
         # Cash Flows Provided from Financing Activities
-        self.Cash_Flow_for_Financing = data.get2("籌資活動之淨現金流入（流出）", 32) * 0.00001 # 單位:億
+        self.Cash_Flow_for_Financing = data.get2("籌資活動之淨現金流入（流出）", 32) * 0.00001  # 單位:億
         # Cash Balances - Beginning of Period
-        self.Cash_Balances_Beginning = data.get2("期初現金及約當現金餘額", 32) * 0.00001 # 單位:億
+        self.Cash_Balances_Beginning = data.get2("期初現金及約當現金餘額", 32) * 0.00001  # 單位:億
         # Cash Balances - End of Period
-        self.Cash_Balances_End = data.get2("期末現金及約當現金餘額", 32) * 0.00001 # 單位:億
+        self.Cash_Balances_End = data.get2("期末現金及約當現金餘額", 32) * 0.00001  # 單位:億
 
         self.dict = {
             "股價": self.price,
@@ -130,11 +135,14 @@ class TW_FinanceGet():
         try:
             self.price = pd.read_csv("C:/Users/pat/Desktop/test_data/price.csv", index_col="date", encoding="utf_8_sig")
             self.price.index = pd.to_datetime(self.price.index, format="%Y-%m-%d")
-            self.Revenue_Month = pd.read_csv("C:/Users/pat/Desktop/test_data/Revenue_Month.csv", index_col="date", encoding="utf_8_sig")
+            self.Revenue_Month = pd.read_csv("C:/Users/pat/Desktop/test_data/Revenue_Month.csv", index_col="date",
+                                             encoding="utf_8_sig")
             self.Revenue_Month.index = pd.to_datetime(self.Revenue_Month.index, format="%Y-%m-%d")
-            self.MR_MonthGrowth = pd.read_csv("C:/Users/pat/Desktop/test_data/MR_MonthGrowth.csv", index_col="date", encoding="utf_8_sig")
+            self.MR_MonthGrowth = pd.read_csv("C:/Users/pat/Desktop/test_data/MR_MonthGrowth.csv", index_col="date",
+                                              encoding="utf_8_sig")
             self.MR_MonthGrowth.index = pd.to_datetime(self.MR_MonthGrowth.index, format="%Y-%m-%d")
-            self.MR_YearGrowth = pd.read_csv("C:/Users/pat/Desktop/test_data/MR_YearGrowth.csv", index_col="date", encoding="utf_8_sig")
+            self.MR_YearGrowth = pd.read_csv("C:/Users/pat/Desktop/test_data/MR_YearGrowth.csv", index_col="date",
+                                             encoding="utf_8_sig")
             self.MR_YearGrowth.index = pd.to_datetime(self.MR_YearGrowth.index, format="%Y-%m-%d")
         except:
             self.price = data.get('收盤價', 800)
@@ -143,9 +151,12 @@ class TW_FinanceGet():
             self.MR_YearGrowth = data.get('去年同月增減(%)', 48)
 
             self.price.to_csv("C:/Users/pat/Desktop/test_data/price.csv", index="date", encoding="utf_8_sig")
-            self.Revenue_Month.to_csv("C:/Users/pat/Desktop/test_data/Revenue_Month.csv", index="date", encoding="utf_8_sig")
-            self.MR_MonthGrowth.to_csv("C:/Users/pat/Desktop/test_data/MR_MonthGrowth.csv", index="date", encoding="utf_8_sig")
-            self.MR_YearGrowth.to_csv("C:/Users/pat/Desktop/test_data/MR_YearGrowth.csv", index="date", encoding="utf_8_sig")
+            self.Revenue_Month.to_csv("C:/Users/pat/Desktop/test_data/Revenue_Month.csv", index="date",
+                                      encoding="utf_8_sig")
+            self.MR_MonthGrowth.to_csv("C:/Users/pat/Desktop/test_data/MR_MonthGrowth.csv", index="date",
+                                       encoding="utf_8_sig")
+            self.MR_YearGrowth.to_csv("C:/Users/pat/Desktop/test_data/MR_YearGrowth.csv", index="date",
+                                      encoding="utf_8_sig")
 
         self.Revenue_Season = data.get2('營業收入合計', 16) * 0.00001  # 單位: 億
         # 營業利益率，也可以簡稱營益率，英文Operating Margin或Operating profit Margin
@@ -170,15 +181,15 @@ class TW_FinanceGet():
         self.Shareholders_equity = 權益總計.fillna(權益總額, inplace=False) * 0.00001  # 單位: 億
 
         # Cash Flow for investing
-        self.Cash_Flow_for_investing = data.get2("投資活動之淨現金流入（流出）", 32) * 0.00001 # 單位:億
+        self.Cash_Flow_for_investing = data.get2("投資活動之淨現金流入（流出）", 32) * 0.00001  # 單位:億
         # Operating Cash Flow
-        self.Operating_Cash_Flow = data.get2("營業活動之淨現金流入（流出）", 32) * 0.00001 # 單位:億
+        self.Operating_Cash_Flow = data.get2("營業活動之淨現金流入（流出）", 32) * 0.00001  # 單位:億
         # Cash Flows Provided from Financing Activities
-        self.Cash_Flow_for_Financing = data.get2("籌資活動之淨現金流入（流出）", 32) * 0.00001 # 單位:億
+        self.Cash_Flow_for_Financing = data.get2("籌資活動之淨現金流入（流出）", 32) * 0.00001  # 單位:億
         # Cash Balances - Beginning of Period
-        self.Cash_Balances_Beginning = data.get2("期初現金及約當現金餘額", 32) * 0.00001 # 單位:億
+        self.Cash_Balances_Beginning = data.get2("期初現金及約當現金餘額", 32) * 0.00001  # 單位:億
         # Cash Balances - End of Period
-        self.Cash_Balances_End = data.get2("期末現金及約當現金餘額", 32) * 0.00001 # 單位:億
+        self.Cash_Balances_End = data.get2("期末現金及約當現金餘額", 32) * 0.00001  # 單位:億
 
         self.dict = {
             "股價": self.price,
@@ -206,7 +217,7 @@ class TW_FinanceGet():
     def Month_data(self, Stock_ID):
         # 輸入數字並存在變數中，可以透過該變數(字串)，呼叫特定股票
         Month_Revenue = self.Revenue_Month[Stock_ID].rename("月營收(百萬)")
-        Month_Revenue = Month_Revenue.astype(int).apply(lambda s: round(s/1000000, 2))
+        Month_Revenue = Month_Revenue.astype(int).apply(lambda s: round(s / 1000000, 2))
         price = self.price[Stock_ID].rename("股價")
         MR_MonthGrowth = self.MR_MonthGrowth[Stock_ID]
         MR_YearGrowth = self.MR_YearGrowth[Stock_ID].rename("月營收年增")
@@ -328,9 +339,9 @@ class TW_FinanceGet():
         '''   杜邦分析   '''
         C_ROE = C_Return_On_Equity
         CE_ROE = C_ROE
-        CE_ROE.update(C_Return_On_Equity[C_Return_On_Equity.index.month == 5]*4)
-        CE_ROE.update(C_Return_On_Equity[C_Return_On_Equity.index.month == 8]*2)
-        CE_ROE.update(C_Return_On_Equity[C_Return_On_Equity.index.month == 11]*4/3)
+        CE_ROE.update(C_Return_On_Equity[C_Return_On_Equity.index.month == 5] * 4)
+        CE_ROE.update(C_Return_On_Equity[C_Return_On_Equity.index.month == 8] * 2)
+        CE_ROE.update(C_Return_On_Equity[C_Return_On_Equity.index.month == 11] * 4 / 3)
         C_TAT = C_Total_Assets_Turnover
         C_PAT = C_profit_after_tax
         C_SE = C_Shareholders_equity
@@ -430,8 +441,8 @@ class TW_FinanceGet():
         }).T
 
         est_df = pd.DataFrame({
-            "樂觀推估營收": df.loc["月營收"]*(1 + max_MR_YG/100),
-            "悲觀推估營收": df.loc["月營收"]*(1 + min_MR_YG/100),
+            "樂觀推估營收": df.loc["月營收"] * (1 + max_MR_YG / 100),
+            "悲觀推估營收": df.loc["月營收"] * (1 + min_MR_YG / 100),
         })
         est_df["樂觀推估稅後淨利"] = est_df["樂觀推估營收"] * PAT_1st
         est_df["悲觀推估稅後淨利"] = est_df["悲觀推估營收"] * PAT_1st
@@ -480,38 +491,38 @@ class TW_FinanceGet():
 
         return final, setting
 
-    @ staticmethod
+    @staticmethod
     def DataProcess(df, cum=None):
 
-            season4 = df[df.index.month == 3]
-            season1 = df[df.index.month == 5]
-            season2 = df[df.index.month == 8]
-            season3 = df[df.index.month == 11]
+        season4 = df[df.index.month == 3]
+        season1 = df[df.index.month == 5]
+        season2 = df[df.index.month == 8]
+        season3 = df[df.index.month == 11]
 
-            season1.index = season1.index.year
-            season2.index = season2.index.year
-            season3.index = season3.index.year
-            season4.index = season4.index.year - 1
+        season1.index = season1.index.year
+        season2.index = season2.index.year
+        season3.index = season3.index.year
+        season4.index = season4.index.year - 1
 
-            if cum:
-                newseason1 = season1
-                newseason2 = season2 + newseason1.reindex_like(season2)
-                newseason3 = season3 + newseason2.reindex_like(season3)
-                newseason4 = season4 + newseason3.reindex_like(season4)
-            else:
-                newseason1 = season1
-                newseason2 = season2 - season1.reindex_like(season2)
-                newseason3 = season3 - season2.reindex_like(season3)
-                newseason4 = season4 - season3.reindex_like(season4)
+        if cum:
+            newseason1 = season1
+            newseason2 = season2 + newseason1.reindex_like(season2)
+            newseason3 = season3 + newseason2.reindex_like(season3)
+            newseason4 = season4 + newseason3.reindex_like(season4)
+        else:
+            newseason1 = season1
+            newseason2 = season2 - season1.reindex_like(season2)
+            newseason3 = season3 - season2.reindex_like(season3)
+            newseason4 = season4 - season3.reindex_like(season4)
 
-            newseason1.index = pd.to_datetime(newseason1.index.astype(str) + '-05-15')
-            newseason2.index = pd.to_datetime(newseason2.index.astype(str) + '-08-14')
-            newseason3.index = pd.to_datetime(newseason3.index.astype(str) + '-11-14')
-            newseason4.index = pd.to_datetime((newseason4.index + 1).astype(str) + '-03-31')
+        newseason1.index = pd.to_datetime(newseason1.index.astype(str) + '-05-15')
+        newseason2.index = pd.to_datetime(newseason2.index.astype(str) + '-08-14')
+        newseason3.index = pd.to_datetime(newseason3.index.astype(str) + '-11-14')
+        newseason4.index = pd.to_datetime((newseason4.index + 1).astype(str) + '-03-31')
 
-            return newseason1.append(newseason2).append(newseason3).append(newseason4).sort_index()
+        return newseason1.append(newseason2).append(newseason3).append(newseason4).sort_index()
 
-    @ staticmethod
+    @staticmethod
     def CashFlowGet(rawData):
         rawData = rawData.fillna(0)
         idx = rawData.index[-1]
@@ -534,6 +545,7 @@ class TW_FinanceGet():
             newData = pd.concat([newData, rawData_1], ignore_index=False)
 
         return newData
+
 
 class FinancialAnalysis(Data):
     def __init__(self, path=None):
@@ -1356,7 +1368,7 @@ class FinancialAnalysis(Data):
         # 與table最新資料比對時間，決定需要增加的數據量
         table_month = self.ws4["A16"].value
         add_row_num = 4 * (int(Season_now[0:4]) - int(table_month[0:4])) + (
-                    int(Season_now[-1]) - int(table_month[-1]))
+                int(Season_now[-1]) - int(table_month[-1]))
 
         if add_row_num <= 0:
             print("Update PER this year.")
@@ -1483,12 +1495,16 @@ class FinancialAnalysis(Data):
         self.ws4.cell(row=13, column=1).value = DATES_str
         self.ws4.cell(row=13, column=1).alignment = Alignment(horizontal="center", vertical="center",
                                                               wrap_text=True)
-        self.Write2Excel(Highest.iloc[0], rounds=1, sheet=self.ws4, rows=12, cols=3, string="新增最高價", date=DATES_str)
+        self.Write2Excel(Highest.iloc[0], rounds=1, sheet=self.ws4, rows=12, cols=3, string="新增最高價",
+                         date=DATES_str)
         self.Write2Excel(Lowest.iloc[0], rounds=1, sheet=self.ws4, rows=13, cols=3, string="新增最低價", date=DATES_str)
-        self.Write2Excel(Opening.iloc[0], rounds=1, sheet=self.ws4, rows=12, cols=5, string="新增開盤價", date=DATES_str)
-        self.Write2Excel(Closing.iloc[0], rounds=1, sheet=self.ws4, rows=13, cols=5, string="新增收盤價", date=DATES_str)
+        self.Write2Excel(Opening.iloc[0], rounds=1, sheet=self.ws4, rows=12, cols=5, string="新增開盤價",
+                         date=DATES_str)
+        self.Write2Excel(Closing.iloc[0], rounds=1, sheet=self.ws4, rows=13, cols=5, string="新增收盤價",
+                         date=DATES_str)
 
         self.wb.save(path)
+
 
 class SelectStock(Data):
     def __init__(self):
@@ -1737,13 +1753,13 @@ class SelectStock(Data):
             end_time = edate.strftime("%Y-%m-%d")
 
             profit_str = "{} - {} 報酬率: {:.2f}% nstock {}".format(start_time, end_time,
-                                                                 (s.iloc[-1] / s.iloc[0] * 100 - 100), len(Idx))
+                                                                    (s.iloc[-1] / s.iloc[0] * 100 - 100), len(Idx))
             comparison.append(profit_str)
             print(profit_str)
 
             benchmark1 = price['0050'][sdate:edate].iloc[1:]
             p0050_str = "{} - {} 的0050報酬率: {:.2f}% ".format(start_time, end_time,
-                                                            (benchmark1.iloc[-1] / benchmark1.iloc[0] * 100 - 100))
+                                                                (benchmark1.iloc[-1] / benchmark1.iloc[0] * 100 - 100))
             comparison.append(p0050_str)
             print(p0050_str)
 
@@ -1814,16 +1830,22 @@ def save_path_sql(path, source="OR"):
         df.to_sql(table_name, conn, index=False, if_exists='replace')
     else:
         df.to_sql(table_name, conn, index=False, if_exists='append')
+
+
 def get_path_sql(type):
     table_name = "Path"
     exist = table_exist(conn, table_name)
     if exist:
         df = pd.read_sql("SELECT path FROM {} WHERE category = '{}'".format(table_name, type), conn)
         return [' '.join(map(str, p)) for p in df.values]
+
+
 def del_path_sql(type, path):
     table_name = "Path"
     conn.execute("DELETE FROM {} WHERE category = '{}' AND path = '{}'".format(table_name, type, path))
     conn.commit()
+
+
 def date_func(table, type):
     if type == "F":
         latest_date = table_latest_date(conn, table)
@@ -1832,6 +1854,8 @@ def date_func(table, type):
     elif type == "T":
         date_list = datetime.datetime.now().strftime('%Y-%m-%d')
     return [date_list]
+
+
 def exec_func(type, from_Date, to_Date):
     if type == "P":
         date = date_range(from_Date, to_Date)
@@ -1847,6 +1871,8 @@ def exec_func(type, from_Date, to_Date):
         function = crawl_finance_statement_by_date
 
     update_table(conn, table, function, date)
+
+
 # 把列出資料夾的程式碼寫成一個函式
 def show_folder_content(folder_path, prefix=None, postfix=None):
     # print(folder_path + '，的資料夾內容：')
@@ -1872,10 +1898,12 @@ def show_folder_content(folder_path, prefix=None, postfix=None):
             else:
                 files_list.append(os.path.join(folder_path, item))
         # else:
-            # print('無法辨識：' + item)
+        # print('無法辨識：' + item)
     return files_list
+
+
 def save_cache_sql(list):
-    dic={
+    dic = {
         "type": list[0],
         "boolean": list[1],
         "content": list[2],
@@ -1890,6 +1918,8 @@ def save_cache_sql(list):
         df.to_sql(table_name, conn, index=False, if_exists='replace')
     else:
         df.to_sql(table_name, conn, index=False, if_exists='append')
+
+
 def get_cache_sql(type, bool=False):
     table_name = "Cache"
     exist = table_exist(conn, table_name)

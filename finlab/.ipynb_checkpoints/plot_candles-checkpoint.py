@@ -2,7 +2,9 @@ import numpy as np
 import pandas as pd
 
 from matplotlib import pyplot as plt
-plt.rcParams["figure.figsize"] = (20,10)
+
+plt.rcParams["figure.figsize"] = (20, 10)
+
 
 def plot_candles(start_time, end_time, pricing, title=None,
                  volume_bars=False,
@@ -23,15 +25,16 @@ def plot_candles(start_time, end_time, pricing, title=None,
       technicals: A list of additional data series to display as subplots.
       technicals_titles: A list of titles to display for each technical indicator.
     """
-    
+
     pricing = pricing[start_time:end_time]
     if overlays is not None:
         overlays = [o[start_time:end_time] for o in overlays]
     if technicals is not None:
         technicals = [t[start_time:end_time] for t in technicals]
-    
+
     def default_color(index, open_price, close_price, low, high):
         return 'g' if open_price[index] > close_price[index] else 'r'
+
     color_function = color_function or default_color
     overlays = overlays or []
     technicals = technicals or []
@@ -42,26 +45,26 @@ def plot_candles(start_time, end_time, pricing, title=None,
     high = pricing['high']
     oc_min = pd.concat([open_price, close_price], axis=1).min(axis=1)
     oc_max = pd.concat([open_price, close_price], axis=1).max(axis=1)
-    
+
     subplot_count = 1
     if volume_bars:
         subplot_count = 2
     if technicals:
         subplot_count += len(technicals)
-    
+
     if subplot_count == 1:
         fig, ax1 = plt.subplots(1, 1)
     else:
         ratios = np.insert(np.full(subplot_count - 1, 1), 0, 3)
         fig, subplots = plt.subplots(subplot_count, 1, sharex=True, gridspec_kw={'height_ratios': ratios})
         ax1 = subplots[0]
-        
+
     if title:
         ax1.set_title(title)
     x = np.arange(len(pricing))
     candle_colors = [color_function(i, open_price, close_price, low, high) for i in x]
-    candles = ax1.bar(x, oc_max-oc_min, bottom=oc_min, color=candle_colors, linewidth=0)
-    lines = ax1.vlines(x , low, high, color=candle_colors, linewidth=1)#+ 0.4
+    candles = ax1.bar(x, oc_max - oc_min, bottom=oc_min, color=candle_colors, linewidth=0)
+    lines = ax1.vlines(x, low, high, color=candle_colors, linewidth=1)  # + 0.4
     ax1.xaxis.grid(False)
     ax1.xaxis.set_tick_params(which='major', length=3.0, direction='in', top=False)
     # Assume minute frequency if first two bars are in the same day.
@@ -72,10 +75,10 @@ def plot_candles(start_time, end_time, pricing, title=None,
     # Set X axis tick labels.
     ticks = [date.strftime(time_format) for date in pricing.index]
     space = max(int(len(ticks) / 20), 1)
-    
+
     for i, t in enumerate(ticks):
-        ticks[i] = t if i%space == 0 or i == len(ticks) - 1 else ''
-        
+        ticks[i] = t if i % space == 0 or i == len(ticks) - 1 else ''
+
     plt.xticks(x, ticks, rotation='vertical')
     for overlay in overlays:
         ax1.plot(x, overlay)
@@ -99,7 +102,7 @@ def plot_candles(start_time, end_time, pricing, title=None,
         ax2.xaxis.grid(False)
     # Plot additional technical indicators
     for (i, technical) in enumerate(technicals):
-        ax = subplots[i - len(technicals)] # Technical indicator plots are shown last
+        ax = subplots[i - len(technicals)]  # Technical indicator plots are shown last
         ax.plot(x, technical)
         if i < len(technicals_titles):
             ax.set_title(technicals_titles[i])

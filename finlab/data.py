@@ -1,7 +1,9 @@
-import sqlite3
-import pandas as pd
-import os
 import datetime
+import os
+import sqlite3
+
+import pandas as pd
+
 
 # class 使用: https://weilihmen.medium.com/%E9%97%9C%E6%96%BCpython%E7%9A%84%E9%A1%9E%E5%88%A5-class-%E5%9F%BA%E6%9C%AC%E7%AF%87-5468812c58f2
 class Data():
@@ -48,9 +50,9 @@ class Data():
             if 'date' in cnames:
                 if tname == 'price':
                     # 假如table是股價的話，則觀察這三檔股票的日期即可（不用所有股票日期都觀察，節省速度）
-                    s1 = ("""SELECT DISTINCT date FROM %s where stock_id='0050'"""%('price'))
-                    s2 = ("""SELECT DISTINCT date FROM %s where stock_id='1101'"""%('price'))
-                    s3 = ("""SELECT DISTINCT date FROM %s where stock_id='2330'"""%('price'))
+                    s1 = ("""SELECT DISTINCT date FROM %s where stock_id='0050'""" % ('price'))
+                    s2 = ("""SELECT DISTINCT date FROM %s where stock_id='1101'""" % ('price'))
+                    s3 = ("""SELECT DISTINCT date FROM %s where stock_id='2330'""" % ('price'))
 
                     # 將日期抓出來並排序整理，放到self.dates中
                     df = (pd.read_sql(s1, self.conn)
@@ -62,7 +64,7 @@ class Data():
                     self.dates[tname] = df
                 else:
                     # 將日期抓出來並排序整理，放到self.dates中
-                    s = ("""SELECT DISTINCT date FROM '%s'"""%(tname))
+                    s = ("""SELECT DISTINCT date FROM '%s'""" % (tname))
                     self.dates[tname] = pd.read_sql(s, self.conn, parse_dates=['date'], index_col=['date']).sort_index()
         print('Data: done')
 
@@ -87,9 +89,11 @@ class Data():
             return self.data[name][enddate:startdate]
 
         # 從資料庫中拿取所需的資料
-        s = ("""SELECT stock_id, date, [%s] FROM %s INDEXED BY ix_{}_stock_id_date WHERE date BETWEEN '%s' AND '%s'""".format(self.col2table[name]) % (name,
-            self.col2table[name], str(enddate.strftime('%Y-%m-%d')),
-            str((self.date + datetime.timedelta(days=1)).strftime('%Y-%m-%d'))))
+        s = (
+                    """SELECT stock_id, date, [%s] FROM %s INDEXED BY ix_{}_stock_id_date WHERE date BETWEEN '%s' AND '%s'""".format(
+                        self.col2table[name]) % (name,
+                                                 self.col2table[name], str(enddate.strftime('%Y-%m-%d')),
+                                                 str((self.date + datetime.timedelta(days=1)).strftime('%Y-%m-%d'))))
 
         print(s)
         ret = pd.read_sql(s, self.conn, parse_dates=['date']).pivot(index='date', columns='stock_id')[name]
@@ -133,9 +137,11 @@ class Data():
             table = self.col2table[name]
 
         # 從資料庫中拿取所需的資料
-        s1 = ("""select stock_id, date, %s from '%s' INDEXED BY ix_{}_stock_id_date WHERE date BETWEEN '%s' AND '%s'""".format(table) % (name,
-            table, str(enddate.strftime('%Y-%m-%d')),
-            str((startdate + datetime.timedelta(days=1)).strftime('%Y-%m-%d'))))
+        s1 = (
+                    """select stock_id, date, %s from '%s' INDEXED BY ix_{}_stock_id_date WHERE date BETWEEN '%s' AND '%s'""".format(
+                        table) % (name,
+                                  table, str(enddate.strftime('%Y-%m-%d')),
+                                  str((startdate + datetime.timedelta(days=1)).strftime('%Y-%m-%d'))))
         # s1 = ("""select stock_id, date, %s from '%s'""" % (name, table))
 
         print(s1)
@@ -175,8 +181,11 @@ class Data():
             return self.data[name][enddate:startdate]
 
         # 從資料庫中拿取所需的資料
-        s = ("""SELECT stock_id, date, [%s] FROM %s INDEXED BY ix_{}_stock_id_date WHERE date BETWEEN '%s' AND '%s'""".format(self.col2table[name]) % (name, self.col2table[name],
-             str(enddate.strftime('%Y-%m-%d')), str((timimg + datetime.timedelta(days=1)).strftime('%Y-%m-%d')) ))
+        s = (
+                    """SELECT stock_id, date, [%s] FROM %s INDEXED BY ix_{}_stock_id_date WHERE date BETWEEN '%s' AND '%s'""".format(
+                        self.col2table[name]) % (name, self.col2table[name],
+                                                 str(enddate.strftime('%Y-%m-%d')),
+                                                 str((timimg + datetime.timedelta(days=1)).strftime('%Y-%m-%d'))))
         ret = pd.read_sql(s, self.conn, parse_dates=['date']).pivot(index='date', columns='stock_id')[name]
 
         # 將這些資料存入cache，以便將來要使用時，不需要從資料庫額外調出來
@@ -187,5 +196,5 @@ class Data():
 
     # 目前沒作用，不需使用
     def get_undeveloped(self, name):
-        s = ("""SELECT stock_id, %s FROM %s """%(name, self.col2table[name]))
+        s = ("""SELECT stock_id, %s FROM %s """ % (name, self.col2table[name]))
         return pd.read_sql(s, self.conn, index_col=['stock_id'])

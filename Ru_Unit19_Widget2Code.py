@@ -1,35 +1,29 @@
-from finlab.crawler import (
-    widget,
+import datetime
+import os
+import sqlite3
 
+from finlab.crawler import (
     crawl_price,
     crawl_monthly_report,
     crawl_finance_statement_by_date,
     update_table,
 
-    table_exist,
     table_latest_date,
     table_earliest_date,
 
     date_range, month_range, season_range
 )
 
-import sqlite3
-import os
-import datetime
-import tqdm
-from io import StringIO
-from dateutil.rrule import rrule, DAILY, MONTHLY
-
 conn = sqlite3.connect(os.path.join('data', "data.db"))
 
 Dictionary = {
-    "A":"更新每日價位",
-    "B":"更新月報",
-    "C":"更新季報",
+    "A": "更新每日價位",
+    "B": "更新月報",
+    "C": "更新季報",
 }
 
 print("動作列表代號: \n ", Dictionary)
-Execution = input("欲執行動作: " )
+Execution = input("欲執行動作: ")
 
 date = []
 table = 'N/A'
@@ -49,12 +43,12 @@ else:
 if Execution == "A" or Execution == "B":
     earliest_date = table_earliest_date(conn, table)
     latest_date = table_latest_date(conn, table)
-    print("資料庫", table, "儲存日期為: 從", earliest_date, " 到 ", latest_date )
+    print("資料庫", table, "儲存日期為: 從", earliest_date, " 到 ", latest_date)
 
 Cfrom_Date = input("是否手動輸入起始更新日期(Y/N):")
 if Cfrom_Date == "Y":
-    from_year , from_month, from_day = input("欲更新日期:").split()
-    from_Date = from_year+"-"+from_month+"-"+from_day
+    from_year, from_month, from_day = input("欲更新日期:").split()
+    from_Date = from_year + "-" + from_month + "-" + from_day
     from_Date = datetime.datetime.strptime(from_Date, '%Y-%m-%d')
 elif Execution == "C":
     from_Date = datetime.datetime.now()
@@ -72,7 +66,6 @@ if Cto_Date == "Y":
 else:
     to_Date = datetime.datetime.now()
 print("最終日期為:", to_Date)
-
 
 if Execution == "A":
     date = date_range(from_Date, to_Date)

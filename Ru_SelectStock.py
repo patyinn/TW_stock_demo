@@ -1,13 +1,15 @@
-from finlab.data import Data
-import pandas as pd
-from matplotlib import pyplot as plt
-# import datetime
-import numpy as np
 # import warnings
 import math
 import os
+
+# import datetime
+import numpy as np
 import openpyxl
-import operator
+import pandas as pd
+from matplotlib import pyplot as plt
+
+from finlab.data import Data
+
 
 def toSeasonal(df):
     season4 = df[df.index.month == 3]
@@ -37,6 +39,7 @@ def toSeasonal(df):
 
     return newseason1.append(newseason2).append(newseason3).append(newseason4).sort_index()
 
+
 # 把列出資料夾的程式碼寫成一個函式
 def show_folder_content(folder_path, prefix=None, postfix=None):
     # print(folder_path + '，的資料夾內容：')
@@ -63,11 +66,11 @@ def show_folder_content(folder_path, prefix=None, postfix=None):
             else:
                 files_list.append(os.path.join(folder_path, item))
         # else:
-            # print('無法辨識：' + item)
+        # print('無法辨識：' + item)
     return files_list
 
-def mystrategy(data, date):
 
+def mystrategy(data, date):
     股本 = data.get3(name='股本合計', n=1, start=date)
     price = data.get3(name='收盤價', n=120, start=date)
     當天股價 = price[:股本.index[-1]].iloc[-1]
@@ -141,8 +144,9 @@ def mystrategy(data, date):
     print(select_stock[select_stock])
     return select_stock[select_stock]
 
+
 def backtest1(start_date, end_date, hold_days, data, weight='average', benchmark=None, stop_loss=None,
-             stop_profit=None):
+              stop_profit=None):
     # portfolio check
     if weight != 'average' and weight != 'price':
         print('Backtest stop, weight should be "average" or "price", find', weight, 'instead')
@@ -290,6 +294,7 @@ def backtest1(start_date, end_date, hold_days, data, weight='average', benchmark
 
     return equality, transactions
 
+
 def ExistFile():
     # target_folder = "D:\GOOGLE 雲端硬碟\Google 雲端硬碟\個人計畫追蹤\財報分析\測試資料夾"
     target_folder = 'D:\GOOGLE 雲端硬碟\Google 雲端硬碟\個人計畫追蹤\財報分析\台股'
@@ -303,24 +308,24 @@ def ExistFile():
         index.append(idx)
     return index
 
-def SaveExcel(ID):
 
+def SaveExcel(ID):
     path = "D:\GOOGLE 雲端硬碟\Google 雲端硬碟\個人計畫追蹤\財報分析\台股\樣板_財報分析.xlsx"
     wb = openpyxl.load_workbook(path)
-    new_path = "D:\GOOGLE 雲端硬碟\Google 雲端硬碟\個人計畫追蹤\財報分析\台股\測選股結果\O_"+ ID +"_ooo財報分析.xlsx"
+    new_path = "D:\GOOGLE 雲端硬碟\Google 雲端硬碟\個人計畫追蹤\財報分析\台股\測選股結果\O_" + ID + "_ooo財報分析.xlsx"
     wb.save(new_path)
+
 
 '''
 回測系統
 '''
 # 老師有建立回測系統，匯入
-from finlab.backtest import backtest
 import datetime
 
 data = Data()
 
-start = datetime.date(2021,4,1)
-end = datetime.date(2021,5,22)
+start = datetime.date(2021, 4, 1)
+end = datetime.date(2021, 5, 22)
 # date = start
 # # 起始日期、結束日期、每幾天更換一次名單、選股策略、資料庫連結
 # profit, record = backtest1(start, end, 31, data, stop_loss=-10, stop_profit=50)

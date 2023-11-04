@@ -1,40 +1,24 @@
-import pandas as pd
 import datetime
-import time
-from matplotlib import pyplot as plt
-from dateutil.relativedelta import relativedelta
 import os
-from io import StringIO
 import sqlite3
-import requests
+import time
+from io import StringIO
 
 import openpyxl
-from openpyxl import Workbook
-from openpyxl.styles import Font
+import pandas as pd
+import requests
+from dateutil.relativedelta import relativedelta
 from openpyxl.styles import Alignment
-from openpyxl.styles import NamedStyle
+from openpyxl.styles import Font
 
 from finlab.data import Data
-from finlab.crawler import (
-    widget,
-
-    crawl_price,
-    crawl_monthly_report,
-    crawl_finance_statement_by_date,
-    update_table,
-
-    table_exist,
-    table_latest_date,
-    table_earliest_date,
-
-    date_range, month_range, season_range
-)
 
 # 一個工作簿(workbook)在建立的時候同時至少也新建了一張工作表(worksheet)
 # wb = Workbook()
 
 conn = sqlite3.connect(os.path.join("data", "data.db"))
 data = Data()
+
 
 # 把列出資料夾的程式碼寫成一個函式
 def show_folder_content(folder_path, prefix=None, postfix=None):
@@ -62,8 +46,9 @@ def show_folder_content(folder_path, prefix=None, postfix=None):
             else:
                 files_list.append(os.path.join(folder_path, item))
         # else:
-            # print('無法辨識：' + item)
+        # print('無法辨識：' + item)
     return files_list
+
 
 def months(str1, str2):
     year1 = datetime.datetime.strptime(str1[0:10], "%Y-%m").year
@@ -75,7 +60,6 @@ def months(str1, str2):
 
 
 def Update_Monthly_report(path, Stock_ID):
-
     '''    從資料庫獲取月營收最新日期    '''
     Revenue_Month = data.get('當月營收', 2)
 
@@ -208,7 +192,6 @@ def Update_Directors_and_supervisors(path, Stock_ID):
         print("drop one row")
     UpdateData = DataNow[DataNow['Data'].isnull()]
 
-
     pd.options.mode.chained_assignment = None
 
     for n in range(len(UpdateData)):
@@ -219,11 +202,12 @@ def Update_Directors_and_supervisors(path, Stock_ID):
         if ws0.cell(row=r, column=1).value == date:
             ws0.cell(row=r, column=10).value = UpdateData['Data'].iloc[n]
             ws0.cell(row=r, column=10).alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            print("更新月份: "+ date_str + " 的資料: " + str(ws0.cell(row=r, column=10).value))
+            print("更新月份: " + date_str + " 的資料: " + str(ws0.cell(row=r, column=10).value))
 
     wb.save(path)
     time.sleep(20)
     print("Directors and supervisors end")
+
 
 # def Update_PER(Stock_ID,path):
 #
@@ -410,7 +394,6 @@ else:
         # Update_PER(id, path=File_path)
     except:
         print("ID 輸入有誤")
-
 
 '''
 手動計算月增率、年增率以及3/12個月平均:

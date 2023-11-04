@@ -1,9 +1,10 @@
 import datetime
+import math
+import warnings
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import warnings
-import math
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
