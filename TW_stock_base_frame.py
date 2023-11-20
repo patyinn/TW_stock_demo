@@ -1,11 +1,78 @@
 import os
+import time
+import asyncio
+import threading
+import multiprocessing
+import functools
 
+from queue import Queue
 from datetime import datetime
 from openpyxl import load_workbook
 
-from tkinter import Tk, Button, Label, StringVar, W, E, N, S, NSEW, Frame, BooleanVar, Checkbutton, CENTER, NO
+from tkinter import Button, Label, StringVar, W, E, N, S, NSEW, Frame
 from tkinter import ttk, scrolledtext, WORD, INSERT, filedialog
 
+msg_queue = Queue()
+
+# def _call_by_async(func):
+#     from concurrent.futures import ProcessPoolExecutor
+#     executor = ProcessPoolExecutor(max_workers=1)
+#
+#     async def non_blocking(loop, self, *args, **kwargs):
+#         tasks = []
+#         tasks.append(
+#             asyncio.create_task(
+#                 await loop.run_in_executor(executor, func, self, *args, **kwargs)
+#             )
+#         )
+#         await asyncio.gather(*tasks)
+#
+#     @functools.wraps(func)
+#     def warpper(self, *args, **kwargs):
+#         loop = asyncio.get_event_loop()
+#         loop.run_until_complete(non_blocking(loop, self, *args, **kwargs))
+#
+#     return warpper
+
+
+# def _call_by_async(func):
+#     @functools.wraps(func)
+#     def wrapper(self, *args, **kwargs):
+#         async def main():
+#             await asyncio.gather(
+#                 asyncio.to_thread(
+#                     func,
+#                     self,
+#                     *args,
+#                     **kwargs
+#                 ),
+#                 asyncio.sleep(1)
+#             )
+#         return asyncio.run(main())
+#     return wrapper
+
+def _call_by_async(fn):
+    '''
+    turns a sync function to async function using threads
+    '''
+    from concurrent.futures import ThreadPoolExecutor
+    import asyncio
+    pool = ThreadPoolExecutor()
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        future = pool.submit(fn, *args, **kwargs)
+
+        try:
+            # Wait for the task to complete and get the result
+            result = asyncio.wrap_future(future)
+        except Exception as e:
+            # Exception occurred during the task
+            print(f"Exception occurred: {type(e).__name__}: {str(e)}")
+
+        return result # make it awaitable
+
+    return wrapper
 
 class BaseFrame(Frame):
     def __init__(self, master, start_page):
@@ -13,6 +80,7 @@ class BaseFrame(Frame):
         Frame.configure(self, bg='pink')
         self.scroll_txt = scrolledtext.ScrolledText(self, wrap=WORD, height=16, width=40)
         self.start_page = start_page
+        self.msg_flag = True
 
     def create_common_widgets(self):
         col, row = self.grid_size()
@@ -22,7 +90,7 @@ class BaseFrame(Frame):
                              pady=30)
 
         # 返回主頁面、更新、清除、離開程式
-        back_btn = Button(self, text="Go back", command=lambda: self.master.switch_frame(self.start_page))
+        back_btn = Button(self, text="Go back", command=self.go_back_func)
         back_btn.grid(row=row + 2, column=0, sticky=W+E)
         update_btn = Button(self, text="Update message", command=self.update_func)
         update_btn.grid(row=row + 2, column=1, sticky=W+E)
@@ -30,6 +98,53 @@ class BaseFrame(Frame):
         clear_btn.grid(row=row + 2, column=3, sticky=W+E)
         exit_btn = Button(self, text="Exit Application", command=self.quit)
         exit_btn.grid(row=row + 2, column=4, sticky=W+E)
+
+    @property
+    def msg_flag(self):
+        return self._msg_flag
+
+    @msg_flag.setter
+    def msg_flag(self, value: bool):
+        self._msg_flag = value
+        if self._msg_flag:
+            # Turn-on the worker thread.
+            threading.Thread(target=self.handle_message, daemon=True).start()
+        else:
+            self._clear_queue()
+
+    def handle_message(self):
+        _pbar_line = 0
+        while self._msg_flag:
+            if not msg_queue.empty():
+                msg = msg_queue.get()
+                if isinstance(msg, tuple):
+                    insert_position = self.scroll_txt.index(INSERT)
+                    line, column = map(int, insert_position.split("."))
+                    if _pbar_line:
+                        del_line = line-_pbar_line
+                        self.scroll_txt.delete(f"end-{del_line+1}l", f"end-{del_line}l")
+                        _pbar_line = line - 1
+                    else:
+                        _pbar_line = line
+                    self.scroll_txt.insert(INSERT, f"{msg[0]}\n")
+                else:
+                    self.scroll_txt.insert(INSERT, f"{msg}\n")
+                msg_queue.task_done()
+
+            # 繼續定期檢查
+            self.update()
+            time.sleep(0.1)
+            # self.after(1000, self.handle_message)
+
+    def _clear_queue(self):
+        while not msg_queue.empty():
+            msg_queue.get()
+
+    # 回到主頁面，關閉線程
+    def go_back_func(self):
+        self.msg_flag = False
+        self._clear_queue()
+        self.master.switch_frame(self.start_page)
 
     # 顯示作業進度
     def update_func(self):
@@ -41,7 +156,7 @@ class BaseFrame(Frame):
 
     # 清除顯示
     def clear_func(self):
-        pass
+        self.scroll_txt.delete(1.0, "end")
 
 
 class BaseScrapperFrame(BaseFrame):
@@ -57,6 +172,9 @@ class BaseScrapperFrame(BaseFrame):
             values=self.crawler_processor.date_func(table=self.table_name, pattern="T")))
         self.create_crawler_widgets()
         self.create_common_widgets()
+
+    def __reduce__(self):
+        return (type(self), (self.some_attribute,))  # Adjust with necessary attributes
 
     def create_crawler_widgets(self):
         # 選擇要爬取的資料型態
@@ -82,6 +200,7 @@ class BaseScrapperFrame(BaseFrame):
         self.to_date_combo['values'] = to_date
 
     # 顯示執行項目
+    @_call_by_async
     def execute_func(self):
         from_date = self.fr_date_combo.get()
         from_date = str(from_date.replace(" ", "-"))
@@ -93,19 +212,15 @@ class BaseScrapperFrame(BaseFrame):
 
         cmd = (from_date, to_date)
 
-        self.scroll_txt.insert(INSERT, "正在爬取從 {} 至 {} 周期間的 {}\n".format(cmd[0], cmd[1], self.table_name))
-        self.update()
-        self.after(1000)
-        self.fr_date_combo.delete(0, "end")
-        self.to_date_combo.delete(0, "end")
+        msg_queue.put("正在爬取從 {} 至 {} 周期間的 {}".format(cmd[0], cmd[1], self.table_name))
+        print("正在爬取從 {} 至 {} 周期間的 {}".format(cmd[0], cmd[1], self.table_name))
         self.crawler_processor.exec_func(self.table_name, cmd[0], cmd[1])
-        self.scroll_txt.insert(INSERT, "完成爬取從 {} 至 {} 周期間的 {}\n".format(cmd[0], cmd[1], self.table_name))
-        self.update()
-        self.after(1000)
+        msg_queue.put("完成爬取從 {} 至 {} 周期間的 {}".format(cmd[0], cmd[1], self.table_name))
+        print("完成爬取從 {} 至 {} 周期間的 {}".format(cmd[0], cmd[1], self.table_name))
 
     # 清除顯示
     def clear_func(self):
-        self.scroll_txt.delete(1.0, "end")
+        super().clear_func()
         self.fr_date_combo.delete(0, "end")
         self.to_date_combo.delete(0, "end")
 

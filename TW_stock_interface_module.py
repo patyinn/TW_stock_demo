@@ -1,34 +1,21 @@
 import os
-import sqlite3
 import time
+import asyncio
+import sqlite3
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as m_ticker
 
 from datetime import datetime
 from tkinter import Tk, Button, Label, StringVar, W, E, N, S, Frame, BooleanVar, Checkbutton, CENTER, NO
-from tkinter import ttk, scrolledtext, WORD, INSERT, filedialog
+from tkinter import ttk, filedialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.pylab import mpl
 
-from TW_stock_module import SystemProcessor, CrawlerProcessor, TWStockModuleRetrieve, FinancialAnalysis, SelectStock
-from TW_stock_base_frame import BaseScrapperFrame, BaseTemplateFrame
+from TW_stock_module import SystemProcessor, CrawlerProcessor, TWStockRetrieveModule, FinancialAnalysis, SelectStock
+from TW_stock_base_frame import BaseScrapperFrame, BaseTemplateFrame, BaseFrame, msg_queue
 
-sys_db_path = os.path.join("data", "record.db")
-sys_conn = sqlite3.connect(sys_db_path)
-sys_processor = SystemProcessor(sys_conn)
 
-try:
-    conn = None
-    crawler_processor = CrawlerProcessor(conn)
-    select_stock = SelectStock(conn)
-except Exception as e:
-    print("no db connect: {}".format(e))
-    conn = None
-    crawler_processor = None
-    select_stock = None
-
-    
 class StockApp(Tk):
     def __init__(self):
         super().__init__()
@@ -50,8 +37,9 @@ class StockApp(Tk):
 class StartPage(Frame):
     def __init__(self, master):
         global conn, crawler_processor, select_stock
-        Frame.__init__(self, master)
-
+        super().__init__(master)
+        Frame.configure(self, bg='pink')
+        
         # 設置資料庫位置
         self.db_path_lbl = Label(self, text="資料庫路徑: ", background="pink", font=("TkDefaultFont", 16))
         self.db_path_lbl.grid(row=0, column=0, sticky=W + E + N + S)
@@ -80,8 +68,8 @@ class StartPage(Frame):
         if not conn:
             try:
                 conn = sqlite3.connect(self.db_path)
-                crawler_processor = CrawlerProcessor(conn)
-                select_stock = SelectStock(conn)
+                crawler_processor = CrawlerProcessor(conn, msg_queue)
+                select_stock = SelectStock(conn, msg_queue)
                 self.btn_switch()
             except Exception as e:
                 print("no db connect: {}".format(e))
@@ -112,8 +100,8 @@ class StartPage(Frame):
 
         try:
             conn = sqlite3.connect(self.db_path)
-            crawler_processor = CrawlerProcessor(conn)
-            select_stock = SelectStock(conn)
+            crawler_processor = CrawlerProcessor(conn, msg_queue)
+            select_stock = SelectStock(conn, msg_queue)
             self.btn_switch()
         except Exception as e:
             print("no db connect: {}".format(e))
@@ -121,8 +109,6 @@ class StartPage(Frame):
             crawler_processor = None
             select_stock = None
             self.btn_switch(disable=True)
-        self.after(1000)
-        self.update()
 
     def btn_switch(self, disable=False):
         if disable:
@@ -175,14 +161,14 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
         curr_size = self.grid_size()
         # 欲更新財報分析excel編號設定、執行的項目
         symbol_label = Label(self, text="Symbol: ", background="pink", font=("TkDefaultFont", 16))
-        symbol_label.grid(row=curr_size[-1]+1, column=0, sticky=W)
-        self.symbol_combo.grid(row=curr_size[-1]+1, column=1, sticky=W)
+        symbol_label.grid(row=curr_size[-1] + 1, column=0, sticky=W)
+        self.symbol_combo.grid(row=curr_size[-1] + 1, column=1, sticky=W)
         # 選擇要執行的項目
         exec_label = Label(self, text="執行項目: ", background="pink", font=("TkDefaultFont", 16))
-        exec_label.grid(row=curr_size[-1]+2, column=0, sticky=W)
-        self.exec_combo.grid(row=curr_size[-1]+2, column=1, sticky=W)
-        execution_btn = Button(self, text="Execute", comman=self.execute_func)
-        execution_btn.grid(row=curr_size[-1]+2, column=2, sticky=W)
+        exec_label.grid(row=curr_size[-1] + 2, column=0, sticky=W)
+        self.exec_combo.grid(row=curr_size[-1] + 2, column=1, sticky=W)
+        execution_btn = Button(self, text="Execute", command=self.execute_func)
+        execution_btn.grid(row=curr_size[-1] + 2, column=2, sticky=W)
 
     # 更新股票代號
     def update_func(self):
@@ -195,121 +181,65 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
     def execute_func(self):
         job = self.exec_combo.get()
         symbol = self.symbol_text.get()
-        list_id, list_dict = self._get_files_id()
+        files_id, files_id_to_path = self._get_files_id()
 
         if symbol == "all":
-            stock_id_list = list_id
+            stock_id_list = files_id
         else:
             stock_id_list = str(symbol).replace(" ", ",").split(",")
             stock_id_list = [i for i in stock_id_list if i.isdigit()]
 
         for stock_id in stock_id_list:
-            if stock_id not in list_id:
+            if stock_id not in files_id:
                 folder_path = os.path.join(self.path_text.get(), "自選新增")
                 self.save_excel(stock_id, folder=folder_path)
                 file_path = os.path.join(folder_path, "O_" + stock_id + "_財報分析.xlsx")
                 time.sleep(0.5)
             else:
-                file_path = list_dict[stock_id]
+                file_path = files_id_to_path[stock_id]
 
-            self._execute_finance_analysis(job, file_path)
+            self._execute_finance_analysis(job, stock_id, file_path)
 
         path = self.template_path_text.get()
         directory = self.path_text.get()
         sys_processor.save_path_sql(path)
         sys_processor.save_path_sql(directory)
 
-    def _execute_finance_analysis(self, job, file_path):
-        fsa = FinancialAnalysis(conn, file_path)
+    def _execute_finance_analysis(self, job, id, file_path):
+        fsa = FinancialAnalysis(conn, msg_queue, file_path)
 
-        # try:
-        if job == "all":
-            fsa.update_monthly_report(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 月報\n".format(id))
-            self.update()
-            self.after(1000)
-            fsa.update_season_report(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 季報\n".format(id))
-            self.update()
-            self.after(1000)
-            fsa.update_cash_flow(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 現金流量表\n".format(id))
-            self.update()
-            self.after(1000)
-            fsa.update_price_today(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
-            self.update()
-            self.after(1000)
-            fsa.update_per(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
-            self.update()
-            self.after(1000)
-            fsa.update_directors_and_supervisors(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 股東占比\n".format(id))
-            self.update()
-            self.after(1000)
-        elif job == "更新月報":
-            fsa.update_monthly_report(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 月報\n".format(id))
-            self.update()
-            self.after(1000)
-            fsa.update_price_today(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
-            self.update()
-            self.after(1000)
-            fsa.update_per(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
-            self.update()
-            self.after(1000)
+        _all_work = [
+            (fsa.update_monthly_report, "完成更新 {} 的 月報".format(id)),
+            (fsa.update_season_report, "完成更新 {} 的 季報".format(id)),
+            (fsa.update_cash_flow, "完成更新 {} 的 現金流量表".format(id)),
+        ]
+        if job == "更新月報":
+            _all_work.pop(2)
+            _all_work.pop(1)
         elif job == "更新季報":
-            fsa.update_season_report(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 季報\n".format(id))
-            self.update()
-            self.after(1000)
-            fsa.update_cash_flow(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 現金流量表\n".format(id))
-            self.update()
-            self.after(1000)
-            fsa.update_price_today(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
-            self.update()
-            self.after(1000)
-            fsa.update_per(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
-            self.update()
-            self.after(1000)
+            _all_work.pop(0)
         elif job == "更新PER與今日價位":
-            fsa.update_price_today(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
-            self.update()
-            self.after(1000)
-            fsa.update_per(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
-            self.update()
-            self.after(1000)
+            _all_work = []
         elif job == "更新股東占比":
-            fsa.update_price_today(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 價位\n".format(id))
-            self.update()
-            self.after(1000)
-            fsa.update_per(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 本益比\n".format(id))
-            self.update()
-            self.after(1000)
-            fsa.update_directors_and_supervisors(id, path=file_path)
-            self.scroll_txt.insert(INSERT, "完成更新 {} 的 股東占比\n".format(id))
-            self.update()
-            self.after(1000)
-        else:
-            self.scroll_txt.insert(INSERT, "輸入有誤\n")
-        self.scroll_txt.insert(INSERT, "完成\n")
+            _all_work = [fsa.update_directors_and_supervisors, "完成更新 {} 的 股東占比".format(id)]
+        _all_work.extend(
+            [
+                (fsa.update_price_today, "完成更新 {} 的 價位".format(id)),
+                (fsa.update_per, "完成更新 {} 的 本益比".format(id)),
+            ]
+        )
+        for func, msg in _all_work:
+            # try:
+            func(id)
+            msg_queue.put(msg)
+            # except Exception as e:
+            #     msg_queue.put("{}發生問題，問題原因: {}".format(id, e))
+            #     print("{}發生問題，問題原因: {}".format(id, e))
 
-        # except Exception as e:
-        #     self.scroll_txt.insert(INSERT, "{}發生問題，問題原因: {}\n".format(id, e))
-        #     print("{}發生問題，問題原因: {}\n".format(id, e))
+        msg_queue.put("財報更新完成")
 
     def clear_func(self):
-        self.scroll_txt.delete(1.0, "end")
+        super().clear_func()
         self.symbol_combo.delete(0, "end")
         self.exec_combo.delete(0, "end")
 
@@ -337,7 +267,8 @@ class SelectStockPage(BaseTemplateFrame):
 
         self.component_list = []
         self.create_condition_list = [
-            "市值", "三年自由現金流", "股東權益報酬率", "營業利益年成長率", "八季營益率變化", "市值營收比", "短期營收年增", "短期營收年增2", "短期淨利年增", "存貨周轉變化率", "rsv"
+            "市值", "三年自由現金流", "股東權益報酬率", "營業利益年成長率", "八季營益率變化", "市值營收比",
+            "短期營收年增", "短期營收年增2", "短期淨利年增", "存貨周轉變化率", "rsv"
         ]
 
         # 設置選取樣板的資料夾及檔案按鈕，並取得路徑
@@ -355,23 +286,24 @@ class SelectStockPage(BaseTemplateFrame):
         curr_size = self.grid_size()
 
         # 選取欲使用的條件以及其設定值
-        Label(self, text="選股條件:", bg="red", font=("TkDefaultFont", 14)).grid(row=curr_size[-1]+1, column=0, columnspan=6, sticky=W+E)
+        Label(self, text="選股條件:", bg="red", font=("TkDefaultFont", 14)).grid(row=curr_size[-1] + 1, column=0,
+                                                                                 columnspan=6, sticky=W + E)
         start_label = Label(self, text="選股日期:", bg="pink", font=("TkDefaultFont", 12))
-        start_label.grid(row=curr_size[-1]+2, column=0, sticky=W + E)
+        start_label.grid(row=curr_size[-1] + 2, column=0, sticky=W + E)
         start_var1 = StringVar()
         start = ttk.Entry(self, textvariable=start_var1, font=("TkDefaultFont", 12))
-        start.grid(row=curr_size[-1]+2, column=1, columnspan=3, sticky=W)
+        start.grid(row=curr_size[-1] + 2, column=1, columnspan=3, sticky=W)
 
-        row, col = curr_size[-1]+3, 0
+        row, col = curr_size[-1] + 3, 0
         for i, cond in enumerate(self.create_condition_list):
-            row = curr_size[-1] + 3 + i//2
+            row = curr_size[-1] + 3 + i // 2
             col = 0 if not (i % 2) else 3
 
             entry_var = StringVar()
             entry = ttk.Entry(self, textvariable=entry_var, width=15, font=("TkDefaultFont", 12))
-            entry.grid(row=row, column=col+2, sticky=W)
+            entry.grid(row=row, column=col + 2, sticky=W)
             combo = ttk.Combobox(self, width=4, values=[">", ">=", "=", "<", "<="])
-            combo.grid(row=row, column=col+1, sticky=W)
+            combo.grid(row=row, column=col + 1, sticky=W)
 
             chk_var = BooleanVar()
             chk = Checkbutton(self, variable=chk_var, bg="pink", text=cond, font=("TkDefaultFont", 12))
@@ -379,67 +311,66 @@ class SelectStockPage(BaseTemplateFrame):
 
             self.component_list.append((chk, chk_var, combo, entry))
 
-
         # 選擇要執行的項目
         if col == 0:
             row, col = row, 3
         else:
-            row, col = row+1, 0
+            row, col = row + 1, 0
         execution_btn = Button(self, text="Execute", command=self.execute_func)
         execution_btn.grid(row=row, column=col, sticky=W + E)
         save_btn = Button(self, text="Save excel", command=self._show_result_and_handle_excel)
-        save_btn.grid(row=row, column=col+1, sticky=W + E)
+        save_btn.grid(row=row, column=col + 1, sticky=W + E)
 
         self.component_list.append((start_label, False, None, start))
         self.start = start
 
     def _create_backtest_widgets(self):
         curr_size = self.grid_size()
-        row = curr_size[-1]+1
+        row = curr_size[-1] + 1
 
         # 回測設置
-        Label(self, text="回測設定:", bg="red", font=("TkDefaultFont", 14)).grid(row=row, column=0, columnspan=6, sticky=W+E)
+        Label(self, text="回測設定:", bg="red", font=("TkDefaultFont", 14)).grid(row=row, column=0, columnspan=6,
+                                                                                 sticky=W + E)
 
         # 回測的起始時間
         end_label = Label(self, text="回測起始日期:", bg="pink", font=("TkDefaultFont", 12))
-        end_label.grid(row=row+1, column=0, sticky=W + E)
+        end_label.grid(row=row + 1, column=0, sticky=W + E)
         end_var1 = StringVar()
         end = ttk.Entry(self, textvariable=end_var1, font=("TkDefaultFont", 12))
-        end.grid(row=row+1, column=1, columnspan=2, sticky=W)
+        end.grid(row=row + 1, column=1, columnspan=2, sticky=W)
 
         # 多少週期更新一次
         period_label = Label(self, text="週期天數:", bg="pink", font=("TkDefaultFont", 12))
-        period_label.grid(row=row+1, column=3, sticky=W + E)
+        period_label.grid(row=row + 1, column=3, sticky=W + E)
         period_var1 = StringVar()
         period = ttk.Entry(self, textvariable=period_var1, font=("TkDefaultFont", 12))
-        period.grid(row=row+1, column=4, columnspan=2, sticky=W)
+        period.grid(row=row + 1, column=4, columnspan=2, sticky=W)
 
         # 是否停利
         sp_var = StringVar()
         sp_entry = ttk.Entry(self, textvariable=sp_var, font=("TkDefaultFont", 12))
-        sp_entry.grid(row=row+2, column=1, columnspan=2, sticky=W)
+        sp_entry.grid(row=row + 2, column=1, columnspan=2, sticky=W)
         sp_chk_var = BooleanVar()
         sp_chk = Checkbutton(self, variable=sp_chk_var, bg="pink", text="停利", font=("TkDefaultFont", 12))
-        sp_chk.grid(row=row+2, column=0, sticky=W + E)
-
+        sp_chk.grid(row=row + 2, column=0, sticky=W + E)
 
         # 是否停損
         sl_var = StringVar()
         sl_entry = ttk.Entry(self, textvariable=sl_var, font=("TkDefaultFont", 12))
-        sl_entry.grid(row=row+2, column=4, columnspan=2, sticky=W)
+        sl_entry.grid(row=row + 2, column=4, columnspan=2, sticky=W)
         sl_chk_var = BooleanVar()
         sl_chk = Checkbutton(self, variable=sl_chk_var, bg="pink", text="停損", font=("TkDefaultFont", 12))
-        sl_chk.grid(row=row+2, column=3, sticky=W + E)
+        sl_chk.grid(row=row + 2, column=3, sticky=W + E)
 
         # 執行回測
         backtest_btn = Button(self, text='執行回測', command=self.backtest_func)
-        backtest_btn.grid(row=row+2, column=6, sticky=W + E)
+        backtest_btn.grid(row=row + 2, column=6, sticky=W + E)
 
         self.component_list += [
-            (end_label, False, None, end, ),
-            (period_label, False, None, period, ),
-            (sp_chk, sp_chk_var, None, sp_entry, ),
-            (sl_chk, sl_chk_var, None, sl_entry, ),
+            (end_label, False, None, end,),
+            (period_label, False, None, period,),
+            (sp_chk, sp_chk_var, None, sp_entry,),
+            (sl_chk, sl_chk_var, None, sl_entry,),
         ]
         self.end = end
         self.period = period
@@ -458,7 +389,8 @@ class SelectStockPage(BaseTemplateFrame):
             content = f"""{chk.cget("text")} {combo.get()} {entry.get()}""" if combo else None
             self.content_list.append(content)
 
-        crawler_processor.save_select_stock_cache_to_sql((self.chk_list, self.chk_var_list, self.content_list, self.combo_list, self.entry_list))
+        crawler_processor.save_select_stock_cache_to_sql(
+            (self.chk_list, self.chk_var_list, self.content_list, self.combo_list, self.entry_list))
 
     # 顯示執行項目
     def execute_func(self):
@@ -467,8 +399,6 @@ class SelectStockPage(BaseTemplateFrame):
         directory = self.path_text.get()
         sys_processor.save_path_sql(path)
         sys_processor.save_path_sql(directory, source="SS")
-        self.update()
-        self.after(1000)
 
         date = datetime.strptime(self.start.get(), "%Y-%m-%d")
         activate_list = self.chk_var_list[:len(self.create_condition_list)]
@@ -478,15 +408,11 @@ class SelectStockPage(BaseTemplateFrame):
         result = select_stock.my_strategy(date=date, cond_content=cond_content_list, activate=activate_list)
         self.selected_stock = list(result.index)
 
-        self.update()
-        self.after(1000)
-        self.scroll_txt.insert(INSERT, "符合選擇條件的股票有: {}\n\n".format(self.selected_stock))
+        msg_queue.put("符合選擇條件的股票有: {}\n".format(self.selected_stock))
 
     # 回測功能
     def backtest_func(self):
         self._save_select_stock_condition()
-        self.update()
-        self.after(1000)
 
         start = datetime.strptime(self.end.get(), "%Y-%m-%d")
         end = datetime.strptime(self.start.get(), "%Y-%m-%d")
@@ -501,19 +427,15 @@ class SelectStockPage(BaseTemplateFrame):
             start, end, period, cond_content_list, activate_list,
             stop_loss=sl, stop_profit=sp
         )
-        self.update()
-        self.after(1000)
 
         for txt in process:
-            self.scroll_txt.insert(INSERT, txt + "\n")
-            self.update()
-            self.after(1000)
-        self.scroll_txt.insert(INSERT, '\n')
-        self.scroll_txt.insert(INSERT, '每次換手最大報酬 : %.2f ％\n' % max_profit)
-        self.scroll_txt.insert(INSERT, '每次換手最少報酬 : %.2f ％\n\n' % min_profit)
-        self.scroll_txt.insert(INSERT, '交易利潤 :\n {}\n\n'.format(profit))
-        self.scroll_txt.insert(INSERT, '交易紀錄 :\n {}\n\n'.format(record))
-        self.scroll_txt.insert(INSERT, "完成\n")
+            msg_queue.put(txt)
+
+        msg_queue.put('每次換手最大報酬 : %.2f ％' % max_profit)
+        msg_queue.put('每次換手最少報酬 : %.2f ％' % min_profit)
+        msg_queue.put('交易利潤 :\n {}\n'.format(profit))
+        msg_queue.put('交易紀錄 :\n {}\n'.format(record))
+        msg_queue.put("完成")
 
     # 顯示作業進度
     def update_func(self):
@@ -540,7 +462,7 @@ class SelectStockPage(BaseTemplateFrame):
 
     # 清除顯示
     def clear_func(self):
-        self.scroll_txt.delete(1.0, "end")
+        super().clear_func()
         for chk, chk_var, combo, entry in self.component_list:
             if chk_var:
                 chk_var.set(0)
@@ -552,17 +474,13 @@ class SelectStockPage(BaseTemplateFrame):
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 
-        self.scroll_txt.insert(INSERT, "\n")
+        msg_queue.put("\n")
         for stock_id in self.selected_stock:
             if stock_id in existed:
-                self.scroll_txt.insert(INSERT, "{}已存在\n\n".format(stock_id))
-                self.update()
-                self.after(1000)
+                msg_queue.put("{}已存在".format(stock_id))
             else:
-                self.scroll_txt.insert(INSERT, "新增{}\n\n".format(stock_id))
+                msg_queue.put("新增{}".format(stock_id))
                 self.save_excel(stock_id, folder=folder_path)
-                self.update()
-                self.after(1000)
 
 
 class StockAnalysisPage(Frame):
@@ -570,7 +488,7 @@ class StockAnalysisPage(Frame):
         Frame.__init__(self, master)
         Frame.configure(self, bg='pink')
         try:
-            self.data_getter = TWStockModuleRetrieve(conn)
+            self.data_getter = TWStockRetrieveModule(conn)
         except Exception as e:
             print("database is not connected: {}".format(e))
             master.switch_frame(StartPage)
@@ -592,7 +510,7 @@ class StockAnalysisPage(Frame):
         self.s_report_btn = Button(self, text="季財報", command=lambda: [self.initial_data(),
                                                                          self.show_table(self.season_df),
                                                                          self.create_widget(self.season_fig, x=0, y=4,
-                                                                                           xs=5)
+                                                                                            xs=5)
                                                                          ])
         self.s_report_btn.grid(row=1, column=2, sticky=W)
         self.cash_btn = Button(self, text="現金流", command=lambda: [self.initial_data(),
@@ -769,6 +687,21 @@ class StockAnalysisPage(Frame):
                 self.data_table.insert(parent='', index='end', text='', values=value)
 
 
-root = StockApp()
+if __name__ == "__main__":
+    sys_db_path = os.path.join("data", "record.db")
+    sys_conn = sqlite3.connect(sys_db_path)
+    sys_processor = SystemProcessor(sys_conn)
 
-root.mainloop()
+    try:
+        conn = None
+        crawler_processor = CrawlerProcessor(conn, None)
+        select_stock = SelectStock(conn, None)
+    except Exception as e:
+        print("no db connect: {}".format(e))
+        conn = None
+        crawler_processor = None
+        select_stock = None
+
+    root = StockApp()
+
+    root.mainloop()
