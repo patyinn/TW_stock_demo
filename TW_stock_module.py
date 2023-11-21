@@ -1171,7 +1171,6 @@ class SelectStock(RetrieveDataModule):
         存貨周轉變化率 = (存貨周轉率 - 前季存貨周轉率) / 前季存貨周轉率 * 100
 
         rsv = (price.iloc[-1] - price.iloc[-60:].min()) / (price.iloc[-60:].max() - price.iloc[-60:].min())
-        print(rsv)
         mapper = {
             "市值": 市值,
             "三年自由現金流": 三年自由現金流,
@@ -1180,6 +1179,7 @@ class SelectStock(RetrieveDataModule):
             "八季營益率變化": 八季營益率變化,
             "市值營收比": 市值營收比,
             "短期營收年增": 短期營收年增,
+            "短期營收年增2": 短期營收年增,
             "長期營收年增": 長期營收年增,
             "短期淨利年增": 短期淨利年增,
             "長期淨利年增": 長期淨利年增,
@@ -1208,11 +1208,9 @@ class SelectStock(RetrieveDataModule):
                 if isinstance(operators, pd.DataFrame):
                     operators = mapper[e.split()[0]][operators].isnull().sum() <= 0
                 condition_list.append(operators)
-        print(condition_list)
         select_stock = condition_list[0]
         for cond in condition_list:
             select_stock = select_stock & cond
-        print(select_stock)
         return select_stock[select_stock]
 
     async def backtest(self, start_date, end_date, hold_days, cond_content, activate, weight='average', benchmark=None,
@@ -1253,25 +1251,13 @@ class SelectStock(RetrieveDataModule):
         for sdate, edate in dates:
             # select stocks at date
             self.date = sdate
-            stocks = self.my_strategy(sdate, cond_content, activate)
+            stocks = await self.my_strategy(sdate, cond_content, activate)
 
             idx = stocks.index.append([keep_idx]).drop_duplicates()
-            print("回測的股票為: ", idx)
+            print("回測的股票為: ", idx.tolist())
+            selected_columns = price[idx.tolist()]
 
-            # Check the shape of idx
-            print("Shape of idx:", idx.shape)
-
-            # Assuming rice has a column corresponding to price.columns
-            # Check the shape of the selected columns
-            selected_columns = price[idx & price.columns]
-            print("Shape of selected_columns:", selected_columns.shape)
-
-            # Assuming sdate and edate are valid datetime indices
-            # Check the shape of the sliced DataFrame
             result = selected_columns[sdate:edate].iloc[1:]
-            print("Shape of result:", result.shape)
-
-            # hold the stocks for hold_days day
             s = price[idx][sdate:edate].iloc[1:]
 
             if s.empty:
@@ -1293,7 +1279,7 @@ class SelectStock(RetrieveDataModule):
                 # record transactions
                 buy_price = s.bfill().iloc[0]
                 sell_price = s.apply(lambda s: s.dropna().iloc[-1])
-                transactions = transactions.append(pd.DataFrame({
+                append_tran = pd.DataFrame({
                     'buy_price': buy_price,
                     'sell_price': sell_price,
                     'lowest_price': s.min(),
@@ -1301,12 +1287,12 @@ class SelectStock(RetrieveDataModule):
                     'buy_date': pd.Series(s.index[0], index=s.columns),
                     'sell_date': s.apply(lambda s: s.dropna().index[-1]),
                     'profit(%)': (sell_price / buy_price - 1) * 100
-                })).sort_index(ascending=True)
+                })
+                transactions = pd.concat([transactions, append_tran]).sort_index(ascending=True)
 
                 s.ffill(inplace=True)
                 s = s.sum(axis=1)
-                # calculate equality
-                # normalize and average the price of each stocks
+
                 if weight == 'average':
                     s = s / s.bfill().iloc[0]
                 else:
@@ -1319,20 +1305,17 @@ class SelectStock(RetrieveDataModule):
             profit_str = "{} - {} 報酬率: {:.2f}% nstock {}".format(start_time, end_time,
                                                                     (s.iloc[-1] / s.iloc[0] * 100 - 100), len(idx))
             comparison.append(profit_str)
-            print(profit_str)
-
             benchmark1 = price['0050'][sdate:edate].iloc[1:]
             p0050_str = "{} - {} 的0050報酬率: {:.2f}% ".format(start_time, end_time,
                                                                 (benchmark1.iloc[-1] / benchmark1.iloc[0] * 100 - 100))
             comparison.append(p0050_str)
-            print(p0050_str)
 
             max_return = max(max_return, s.iloc[-1] / s.iloc[0] * 100 - 100)
             min_return = min(min_return, s.iloc[-1] / s.iloc[0] * 100 - 100)
 
             # plot backtest result
             ((s * end - 1) * 100).plot(ax=ax[0])
-            equality = equality.append(s * end)
+            equality = pd.concat([equality, s * end])
             end = (s / s[0] * end).iloc[-1]
 
             if math.isnan(end):
