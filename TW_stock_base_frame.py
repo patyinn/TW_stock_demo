@@ -3,7 +3,7 @@ import time
 import asyncio
 import threading
 import multiprocessing
-import functools
+import sqlite3
 
 from queue import Queue
 from datetime import datetime
@@ -12,75 +12,20 @@ from openpyxl import load_workbook
 from tkinter import Button, Label, StringVar, W, E, N, S, NSEW, Frame
 from tkinter import ttk, scrolledtext, WORD, INSERT, filedialog
 
+from TW_stock_module import CrawlerProcessor
+from utils import call_by_async
+
 msg_queue = Queue()
 
-# def _call_by_async(func):
-#     from concurrent.futures import ProcessPoolExecutor
-#     executor = ProcessPoolExecutor(max_workers=1)
-#
-#     async def non_blocking(loop, self, *args, **kwargs):
-#         tasks = []
-#         tasks.append(
-#             asyncio.create_task(
-#                 await loop.run_in_executor(executor, func, self, *args, **kwargs)
-#             )
-#         )
-#         await asyncio.gather(*tasks)
-#
-#     @functools.wraps(func)
-#     def warpper(self, *args, **kwargs):
-#         loop = asyncio.get_event_loop()
-#         loop.run_until_complete(non_blocking(loop, self, *args, **kwargs))
-#
-#     return warpper
-
-
-# def _call_by_async(func):
-#     @functools.wraps(func)
-#     def wrapper(self, *args, **kwargs):
-#         async def main():
-#             await asyncio.gather(
-#                 asyncio.to_thread(
-#                     func,
-#                     self,
-#                     *args,
-#                     **kwargs
-#                 ),
-#                 asyncio.sleep(1)
-#             )
-#         return asyncio.run(main())
-#     return wrapper
-
-def _call_by_async(fn):
-    '''
-    turns a sync function to async function using threads
-    '''
-    from concurrent.futures import ThreadPoolExecutor
-    import asyncio
-    pool = ThreadPoolExecutor()
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        future = pool.submit(fn, *args, **kwargs)
-
-        try:
-            # Wait for the task to complete and get the result
-            result = asyncio.wrap_future(future)
-        except Exception as e:
-            # Exception occurred during the task
-            print(f"Exception occurred: {type(e).__name__}: {str(e)}")
-
-        return result # make it awaitable
-
-    return wrapper
 
 class BaseFrame(Frame):
-    def __init__(self, master, start_page):
+    def __init__(self, master, start_page, async_loop):
         super().__init__(master)
         Frame.configure(self, bg='pink')
         self.scroll_txt = scrolledtext.ScrolledText(self, wrap=WORD, height=16, width=40)
         self.start_page = start_page
         self.msg_flag = True
+        self.async_loop = async_loop
 
     def create_common_widgets(self):
         col, row = self.grid_size()
@@ -160,21 +105,21 @@ class BaseFrame(Frame):
 
 
 class BaseScrapperFrame(BaseFrame):
-    def __init__(self, master, mode, start_page, crawler_processor, table_name):
-        super().__init__(master, start_page)
+    def __init__(self, master, mode,  db_path,  start_page, table_name, async_loop):
+        super().__init__(master, start_page, async_loop)
         self.master = master
         self.mode = mode
-        self.crawler_processor = crawler_processor
+        conn = sqlite3.connect(db_path)
+        self.crawler_processor = CrawlerProcessor(conn, msg_queue)
+
         self.table_name = table_name
         self.to_date_combo = ttk.Combobox(self, postcommand=lambda: self.fr_date_combo.configure(
-            values=self.crawler_processor.date_func(table=self.table_name, pattern="F")))
+            values=self.crawler_processor.date_func(table=self.table_name, pattern="from")))
         self.fr_date_combo = ttk.Combobox(self, postcommand=lambda: self.to_date_combo.configure(
-            values=self.crawler_processor.date_func(table=self.table_name, pattern="T")))
+            values=self.crawler_processor.date_func(table=self.table_name, pattern="to")))
         self.create_crawler_widgets()
         self.create_common_widgets()
 
-    def __reduce__(self):
-        return (type(self), (self.some_attribute,))  # Adjust with necessary attributes
 
     def create_crawler_widgets(self):
         # 選擇要爬取的資料型態
@@ -188,20 +133,19 @@ class BaseScrapperFrame(BaseFrame):
         to_date_label.grid(row=1, column=2, sticky=W)
         self.to_date_combo.grid(row=1, column=3, sticky=W)
 
-        execution_btn = Button(self, text="Execute", comman=self.execute_func)
+        execution_btn = Button(self, text="Execute", command=self.execute_func)
         execution_btn.grid(row=1, column=4, sticky=W)
 
     # 顯示作業進度
     def update_func(self):
-        to_date = self.crawler_processor.date_func(table=self.table_name, pattern="T")
-        from_date = self.crawler_processor.date_func(table=self.table_name, pattern="F")
-
-        self.fr_date_combo['values'] = from_date
-        self.to_date_combo['values'] = to_date
+        to_date = self.crawler_processor.date_func(table=self.table_name, pattern="to")
+        from_date = self.crawler_processor.date_func(table=self.table_name, pattern="from")
+        self.fr_date_combo.set(from_date)
+        self.to_date_combo.set(to_date)
 
     # 顯示執行項目
-    @_call_by_async
-    def execute_func(self):
+    @call_by_async
+    async def execute_func(self):
         from_date = self.fr_date_combo.get()
         from_date = str(from_date.replace(" ", "-"))
         from_date = datetime.strptime(from_date, '%Y-%m-%d')
@@ -214,7 +158,10 @@ class BaseScrapperFrame(BaseFrame):
 
         msg_queue.put("正在爬取從 {} 至 {} 周期間的 {}".format(cmd[0], cmd[1], self.table_name))
         print("正在爬取從 {} 至 {} 周期間的 {}".format(cmd[0], cmd[1], self.table_name))
-        self.crawler_processor.exec_func(self.table_name, cmd[0], cmd[1])
+
+        task = asyncio.create_task(self.crawler_processor.exec_func(self.table_name, cmd[0], cmd[1]))
+        await task
+
         msg_queue.put("完成爬取從 {} 至 {} 周期間的 {}".format(cmd[0], cmd[1], self.table_name))
         print("完成爬取從 {} 至 {} 周期間的 {}".format(cmd[0], cmd[1], self.table_name))
 
@@ -226,8 +173,8 @@ class BaseScrapperFrame(BaseFrame):
 
 
 class BaseTemplateFrame(BaseFrame):
-    def __init__(self, master, sys_processor, directory_type, start_page):
-        super().__init__(master, start_page)
+    def __init__(self, master, sys_processor, directory_type, start_page, async_loop):
+        super().__init__(master, start_page, async_loop)
         self.sys_processor = sys_processor
         self.directory_type = directory_type
         self.template_path_text = StringVar()

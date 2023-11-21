@@ -1,10 +1,11 @@
 import os
 import re
-import time
+import sqlite3
 import math
 import datetime
 import operator
 import requests
+import asyncio
 import numpy as np
 import pandas as pd
 
@@ -38,15 +39,15 @@ class SystemProcessor:
         )
         self.conn.commit()
 
-    def save_path_sql(self, path, source="OR"):
+    def save_path_sql(self, path, source="origin"):
         table_name = "path"
         df = pd.DataFrame()
         if os.path.exists(path):
             if os.path.isdir(path):
-                if source == "OR":
+                if source == "origin":
                     df["category"] = ["directory"]
                     df["path"] = [path]
-                elif source == "SS":
+                elif source == "select_stock":
                     df["category"] = ["select_stock_directory"]
                     df["path"] = [path]
             elif os.path.isfile(path):
@@ -102,7 +103,7 @@ class CrawlerProcessor(Crawler):
         self.conn = conn
         self.msg_queue = msg_queue
 
-    def exec_func(self, table, from_date, to_date):
+    async def exec_func(self, table, from_date, to_date, force=False):
         additional_arg = {}
         if table == "price":
             date = self.date_range(from_date, to_date)
@@ -112,17 +113,17 @@ class CrawlerProcessor(Crawler):
             function = self.crawl_monthly_report
         elif table == "finance_statement":
             date = self.season_range(from_date, to_date)
-            function = self.crawl_finance_statement_by_date
+            function = self.determine_crawl_finance_statement_func_by_date
             additional_arg = {
-                "force": False,
+                "force": force,
                 "base_directory": "",
             }
-        self.update_table(table, function, date, **additional_arg)
+        await self.update_table(table, function, date, **additional_arg)
 
     def date_func(self, table, pattern):
         if table == "finance_statement":
             table = "balance_sheet"
-        if pattern == "F":
+        if pattern == "from":
             latest_date = self.table_latest_date(table)
             date_list = latest_date + datetime.timedelta(days=1)
             date_list = date_list.strftime('%Y-%m-%d')
@@ -156,15 +157,16 @@ class CrawlerProcessor(Crawler):
 
 
 class FinancialAnalysis(RetrieveDataModule):
-    def __init__(self, conn, msg_queue, path):
-        self.file_path = path
-        self.wb = load_workbook(path)
+    def __init__(self, db_path, msg_queue, file_path):
+        self.file_path = file_path
+        self.wb = load_workbook(self.file_path)
         self.ws0 = self.wb["月財報"]
         self.ws1 = self.wb["季財報"]
         self.ws2 = self.wb["現金流量"]
         self.ws3 = self.wb["進出場參考"]
         self.ws4 = self.wb["合理價推估"]
         self.msg_queue = msg_queue
+        conn = sqlite3.connect(db_path)
         super().__init__(conn, msg_queue)
 
     @staticmethod
@@ -321,7 +323,7 @@ class FinancialAnalysis(RetrieveDataModule):
             sheet.cell(row=rows, column=cols).font = Font(color='FF0000')  # 紅色
         return {}
 
-    def update_monthly_report(self, stock_id, path=None):
+    async def update_monthly_report(self, stock_id, path=None):
         '''    從資料庫獲取月營收最新日期    '''
         revenue_month = self.get_data('當月營收', 2)
 
@@ -423,10 +425,10 @@ class FinancialAnalysis(RetrieveDataModule):
                 self.ws0.cell(row=5, column=20).alignment = Alignment(horizontal="center", vertical="center",
                                                                       wrap_text=True)
         self.wb.save(path or self.file_path)
-        print("Month Report end")
-        self.msg_queue.put("Month Report end")
+        print("完成更新 {} 的 月報".format(stock_id))
+        self.msg_queue.put("完成更新 {} 的 月報".format(stock_id))
 
-    def update_directors_and_supervisors(self, stock_id, path=None):
+    async def update_directors_and_supervisors(self, stock_id, path=None):
         # 設定headers
         headers = {
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.105 Safari/537.36'
@@ -489,11 +491,11 @@ class FinancialAnalysis(RetrieveDataModule):
                 self.msg_queue.put(f"Doesn't get {date_str} Data")
 
         self.wb.save(path or self.file_path)
-        time.sleep(20)
-        print("Directors and supervisors end")
-        self.msg_queue.put("Directors and supervisors end")
+        await asyncio.sleep(1)
+        print("完成更新 {} 的 股東占比".format(stock_id))
+        self.msg_queue.put("完成更新 {} 的 股東占比".format(stock_id))
 
-    def update_season_report(self, stock_id, path=None):
+    async def update_season_report(self, stock_id, path=None):
         '''    從資料庫獲取季報最新日期    '''
         revenue_season = self.get_data_assign_table('營業收入合計', 5)
         revenue_season = revenue_season[stock_id]
@@ -833,8 +835,10 @@ class FinancialAnalysis(RetrieveDataModule):
             # 折舊負擔比率
             self.warning_func(condition_dar[n], sheet=self.ws1, rows=28, cols=c, threat='False')
         self.wb.save(path or self.file_path)
+        print("完成更新 {} 的 季報".format(stock_id))
+        self.msg_queue.put("完成更新 {} 的 季報".format(stock_id))
 
-    def update_cash_flow(self, stock_id, path=None):
+    async def update_cash_flow(self, stock_id, path=None):
         '''    從資料庫獲取季報最新日期    '''
         cash_flow_for_investing = self.get_data_assign_table("投資活動之淨現金流入（流出）", 5)
         cash_flow_for_investing = cash_flow_for_investing[stock_id]
@@ -946,8 +950,10 @@ class FinancialAnalysis(RetrieveDataModule):
             self.msg_queue.put(f"{stock_id} 警告上色錯誤")
 
         self.wb.save(path or self.file_path)
+        print("完成更新 {} 的 現金流量表".format(stock_id))
+        self.msg_queue.put("完成更新 {} 的 現金流量表".format(stock_id))
 
-    def update_per(self, stock_id, path=None):
+    async def update_per(self, stock_id, path=None):
         '''    從資料庫獲取季報最新日期    '''
         # *未結束年度之EPS預估值, 以最近四季之合計EPS取代之, 例如: 某股票EPS僅公布至今年第三季, 則
         # 今年之預估EPS = 去年第四季至今年第三季之合計EPS。
@@ -1071,8 +1077,10 @@ class FinancialAnalysis(RetrieveDataModule):
             self.write_to_excel(per, rounds=2, sheet=self.ws4, rows=16, cols=2, string="新增PER", date=update_season)
 
         self.wb.save(path or self.file_path)
+        print("完成更新 {} 的 本益比".format(stock_id))
+        self.msg_queue.put("完成更新 {} 的 本益比".format(stock_id))
 
-    def update_price_today(self, stock_id, path=None):
+    async def update_price_today(self, stock_id, path=None):
         highest = self.get_data('最高價', 1)
         lowest = self.get_data('最低價', 1)
         opening = self.get_data('開盤價', 1)
@@ -1100,6 +1108,8 @@ class FinancialAnalysis(RetrieveDataModule):
                             date=dates_str)
 
         self.wb.save(path or self.file_path)
+        print("完成更新 {} 的 價位".format(stock_id))
+        self.msg_queue.put("完成更新 {} 的 價位".format(stock_id))
 
 
 class SelectStock(RetrieveDataModule):
@@ -1107,7 +1117,7 @@ class SelectStock(RetrieveDataModule):
         super().__init__(conn, msg_queue)
         self.msg_queue = msg_queue
 
-    def my_strategy(self, date, cond_content, activate):
+    async def my_strategy(self, date, cond_content, activate):
         稅後淨利 = self.get_data(name='本期淨利（淨損）', n=9, start=date)
 
         股本 = self.get_data(name='股本合計', n=1, start=date)
@@ -1161,7 +1171,7 @@ class SelectStock(RetrieveDataModule):
         存貨周轉變化率 = (存貨周轉率 - 前季存貨周轉率) / 前季存貨周轉率 * 100
 
         rsv = (price.iloc[-1] - price.iloc[-60:].min()) / (price.iloc[-60:].max() - price.iloc[-60:].min())
-
+        print(rsv)
         mapper = {
             "市值": 市值,
             "三年自由現金流": 三年自由現金流,
@@ -1176,7 +1186,6 @@ class SelectStock(RetrieveDataModule):
             "存貨周轉變化率": 存貨周轉變化率,
             "rsv": rsv
         }
-
         ops = {
             "<": operator.lt,
             "<=": operator.le,
@@ -1184,30 +1193,29 @@ class SelectStock(RetrieveDataModule):
             ">=": operator.ge,
             "=": operator.eq,
         }
-
-        def operator_func(var, op, con):
+        def _operator_func(var, op, con):
             a = mapper[var]
             if con in mapper:
-                b = mapper[con]
+                value = mapper[con]
             else:
-                b = float(con)
-            return ops[op](a, b)
+                value = float(con)
+            return ops[op](a, value)
 
         condition_list = []
         for b, e in zip(activate, cond_content):
             if len(e.split()) >= 3 and b is True:
-                operators = operator_func(*(e.split()))
+                operators = _operator_func(*(e.split()))
                 if isinstance(operators, pd.DataFrame):
                     operators = mapper[e.split()[0]][operators].isnull().sum() <= 0
                 condition_list.append(operators)
-
+        print(condition_list)
         select_stock = condition_list[0]
         for cond in condition_list:
             select_stock = select_stock & cond
-
+        print(select_stock)
         return select_stock[select_stock]
 
-    def backtest(self, start_date, end_date, hold_days, cond_content, activate, weight='average', benchmark=None,
+    async def backtest(self, start_date, end_date, hold_days, cond_content, activate, weight='average', benchmark=None,
                  stop_loss=None,
                  stop_profit=None):
         # portfolio check

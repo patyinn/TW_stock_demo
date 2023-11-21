@@ -12,8 +12,9 @@ from tkinter import ttk, filedialog
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.pylab import mpl
 
-from TW_stock_module import SystemProcessor, CrawlerProcessor, TWStockRetrieveModule, FinancialAnalysis, SelectStock
-from TW_stock_base_frame import BaseScrapperFrame, BaseTemplateFrame, BaseFrame, msg_queue
+from TW_stock_module import SystemProcessor, TWStockRetrieveModule, FinancialAnalysis, SelectStock, CrawlerProcessor
+from TW_stock_base_frame import BaseScrapperFrame, BaseTemplateFrame, msg_queue
+from utils import call_by_async
 
 
 class StockApp(Tk):
@@ -36,7 +37,7 @@ class StockApp(Tk):
 
 class StartPage(Frame):
     def __init__(self, master):
-        global conn, crawler_processor, select_stock
+        global db_path, sys_processor
         super().__init__(master)
         Frame.configure(self, bg='pink')
         
@@ -65,18 +66,7 @@ class StartPage(Frame):
         self.db_path = sys_processor.get_latest_path_sql("db") or os.path.join("data", "data.db")
         self.db_path_text.set(self.db_path)
 
-        if not conn:
-            try:
-                conn = sqlite3.connect(self.db_path)
-                crawler_processor = CrawlerProcessor(conn, msg_queue)
-                select_stock = SelectStock(conn, msg_queue)
-                self.btn_switch()
-            except Exception as e:
-                print("no db connect: {}".format(e))
-                conn = None
-                crawler_processor = None
-                select_stock = None
-                self.btn_switch(disable=True)
+        db_path = self.db_path
 
         self.db_path_entry = ttk.Entry(self, width=30, textvariable=self.db_path_text)
         self.db_path_entry.grid(row=0, column=1, columnspan=3, sticky=W + E + N + S)
@@ -85,7 +75,7 @@ class StartPage(Frame):
 
     # 取得樣板檔案位置
     def get_db_path(self):
-        global conn, crawler_processor, select_stock
+        global db_path
 
         # 獲取文件全路徑
         db_name = filedialog.askopenfilename(title='Select Template',
@@ -97,18 +87,7 @@ class StartPage(Frame):
         self.db_path_entry.insert(0, db_name)
 
         sys_processor.save_path_sql(db_name)
-
-        try:
-            conn = sqlite3.connect(self.db_path)
-            crawler_processor = CrawlerProcessor(conn, msg_queue)
-            select_stock = SelectStock(conn, msg_queue)
-            self.btn_switch()
-        except Exception as e:
-            print("no db connect: {}".format(e))
-            conn = None
-            crawler_processor = None
-            select_stock = None
-            self.btn_switch(disable=True)
+        db_path = db_name
 
     def btn_switch(self, disable=False):
         if disable:
@@ -129,22 +108,22 @@ class StartPage(Frame):
 
 class MonthlyReportScrapperPage(BaseScrapperFrame):
     def __init__(self, master):
-        super().__init__(master, "月報", StartPage, crawler_processor, "monthly_revenue")
+        super().__init__(master, "月報", db_path, StartPage, "monthly_revenue", async_loop)
 
 
 class SeasonalReportScrapperPage(BaseScrapperFrame):
     def __init__(self, master):
-        super().__init__(master, "季報", StartPage, crawler_processor, "finance_statement")
+        super().__init__(master, "季報", db_path, StartPage, "finance_statement", async_loop)
 
 
 class PriceScrapperPage(BaseScrapperFrame):
     def __init__(self, master):
-        super().__init__(master, "價位", StartPage, crawler_processor, "price")
+        super().__init__(master, "價位", db_path, StartPage, "price", async_loop)
 
 
 class FinancialReportAnalysisPage(BaseTemplateFrame):
     def __init__(self, master):
-        super().__init__(master, sys_processor, "directory", StartPage)
+        super().__init__(master, sys_processor, "directory", StartPage, async_loop)
         self.symbol_text = StringVar()
         self.symbol_list = self._get_files_id()[0]
         self.symbol_list.insert(0, "all")
@@ -178,7 +157,8 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
         self.symbol_combo['values'] = symbol
 
     # 顯示執行項目
-    def execute_func(self):
+    @call_by_async
+    async def execute_func(self):
         job = self.exec_combo.get()
         symbol = self.symbol_text.get()
         files_id, files_id_to_path = self._get_files_id()
@@ -198,45 +178,50 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
             else:
                 file_path = files_id_to_path[stock_id]
 
-            self._execute_finance_analysis(job, stock_id, file_path)
+            await self._execute_finance_analysis(job, stock_id, file_path)
+
+        msg_queue.put("財報更新完成")
 
         path = self.template_path_text.get()
         directory = self.path_text.get()
-        sys_processor.save_path_sql(path)
-        sys_processor.save_path_sql(directory)
 
-    def _execute_finance_analysis(self, job, id, file_path):
-        fsa = FinancialAnalysis(conn, msg_queue, file_path)
+        sub_sys_conn = sqlite3.connect(sys_db_path)
+        sub_sys_processor = SystemProcessor(sub_sys_conn)
+        sub_sys_processor.save_path_sql(path)
+        sub_sys_processor.save_path_sql(directory)
+
+    async def _execute_finance_analysis(self, job, stock_id, file_path):
+        fsa = FinancialAnalysis(db_path, msg_queue, file_path)
 
         _all_work = [
-            (fsa.update_monthly_report, "完成更新 {} 的 月報".format(id)),
-            (fsa.update_season_report, "完成更新 {} 的 季報".format(id)),
-            (fsa.update_cash_flow, "完成更新 {} 的 現金流量表".format(id)),
+            fsa.update_monthly_report(stock_id),
+            fsa.update_season_report(stock_id),
+            fsa.update_cash_flow(stock_id),
         ]
         if job == "更新月報":
-            _all_work.pop(2)
-            _all_work.pop(1)
+            _all_work = [
+                fsa.update_monthly_report(stock_id),
+            ]
         elif job == "更新季報":
-            _all_work.pop(0)
+            _all_work = [
+                fsa.update_season_report(stock_id),
+                fsa.update_cash_flow(stock_id),
+            ]
         elif job == "更新PER與今日價位":
             _all_work = []
         elif job == "更新股東占比":
-            _all_work = [fsa.update_directors_and_supervisors, "完成更新 {} 的 股東占比".format(id)]
+            _all_work = [fsa.update_directors_and_supervisors]
         _all_work.extend(
             [
-                (fsa.update_price_today, "完成更新 {} 的 價位".format(id)),
-                (fsa.update_per, "完成更新 {} 的 本益比".format(id)),
+                fsa.update_price_today(stock_id),
+                fsa.update_per(stock_id),
             ]
         )
-        for func, msg in _all_work:
-            # try:
-            func(id)
-            msg_queue.put(msg)
-            # except Exception as e:
-            #     msg_queue.put("{}發生問題，問題原因: {}".format(id, e))
-            #     print("{}發生問題，問題原因: {}".format(id, e))
-
-        msg_queue.put("財報更新完成")
+        try:
+            await asyncio.gather(*_all_work, return_exceptions=True)
+        except Exception as e:
+            msg_queue.put("{}發生問題，問題原因: {}".format(stock_id, e))
+            print("{}發生問題，問題原因: {}".format(stock_id, e))
 
     def clear_func(self):
         super().clear_func()
@@ -246,7 +231,7 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
 
 class SelectStockPage(BaseTemplateFrame):
     def __init__(self, master):
-        super().__init__(master, sys_processor, "select_stock_directory", StartPage)
+        super().__init__(master, sys_processor, "select_stock_directory", StartPage, async_loop)
         self.selected_stock = []
 
         # 用於儲存sql
@@ -280,6 +265,8 @@ class SelectStockPage(BaseTemplateFrame):
         # 顯示更新動作進度
         self.create_common_widgets()
 
+        conn = sqlite3.connect(db_path)
+        self.crawler_processor = CrawlerProcessor(conn, msg_queue)
         self.update_func()
 
     def _create_select_stock_widgets(self):
@@ -380,7 +367,7 @@ class SelectStockPage(BaseTemplateFrame):
         self.sl_entry = sl_entry
 
     # 選定後，自動帶入上次執行成功的條件
-    def _save_select_stock_condition(self):
+    def _save_select_stock_condition(self, crawler_processor):
         for chk, chk_var, combo, entry in self.component_list:
             self.chk_list.append(chk.cget("text"))
             self.chk_var_list.append(chk_var.get() if chk_var else chk_var)
@@ -393,26 +380,46 @@ class SelectStockPage(BaseTemplateFrame):
             (self.chk_list, self.chk_var_list, self.content_list, self.combo_list, self.entry_list))
 
     # 顯示執行項目
-    def execute_func(self):
-        self._save_select_stock_condition()
+    @call_by_async
+    async def execute_func(self):
+        print("開始執行")
+        msg_queue.put("開始執行")
+
+        conn = sqlite3.connect(db_path)
+        crawler_processor = CrawlerProcessor(conn, msg_queue)
+        select_stock = SelectStock(conn, msg_queue)
+        sub_sys_conn = sqlite3.connect(sys_db_path)
+        sub_sys_processor = SystemProcessor(sub_sys_conn)
+        print("連接上db")
+        msg_queue.put("連接上db")
+        self._save_select_stock_condition(crawler_processor)
+
         path = self.template_path_text.get()
         directory = self.path_text.get()
-        sys_processor.save_path_sql(path)
-        sys_processor.save_path_sql(directory, source="SS")
+        sub_sys_processor.save_path_sql(path)
+        sub_sys_processor.save_path_sql(directory, source="select_stock")
+        print("儲存完選股條件及路徑資料")
+        msg_queue.put("儲存完選股條件及路徑資料")
 
         date = datetime.strptime(self.start.get(), "%Y-%m-%d")
         activate_list = self.chk_var_list[:len(self.create_condition_list)]
         cond_content_list = self.content_list[:len(self.create_condition_list)]
         # cond_content_list = list(filter(None, cond_content_list))
 
-        result = select_stock.my_strategy(date=date, cond_content=cond_content_list, activate=activate_list)
+        print("開始選股")
+        msg_queue.put("開始選股")
+        result = await select_stock.my_strategy(date=date, cond_content=cond_content_list, activate=activate_list)
         self.selected_stock = list(result.index)
 
         msg_queue.put("符合選擇條件的股票有: {}\n".format(self.selected_stock))
 
     # 回測功能
-    def backtest_func(self):
-        self._save_select_stock_condition()
+    @call_by_async
+    async def backtest_func(self):
+        conn = sqlite3.connect(db_path)
+        crawler_processor = CrawlerProcessor(conn, msg_queue)
+        select_stock = SelectStock(conn, msg_queue)
+        self._save_select_stock_condition(crawler_processor)
 
         start = datetime.strptime(self.end.get(), "%Y-%m-%d")
         end = datetime.strptime(self.start.get(), "%Y-%m-%d")
@@ -423,7 +430,7 @@ class SelectStockPage(BaseTemplateFrame):
         sp = float(self.sp_entry.get()) if self.sp_chk_var.get() else None
         sl = float(self.sl_entry.get()) if self.sl_chk_var.get() else None
 
-        (profit, record, max_profit, min_profit, process) = select_stock.backtest(
+        (profit, record, max_profit, min_profit, process) = await select_stock.backtest(
             start, end, period, cond_content_list, activate_list,
             stop_loss=sl, stop_profit=sp
         )
@@ -441,7 +448,7 @@ class SelectStockPage(BaseTemplateFrame):
     def update_func(self):
         self.clear_func()
         for (chk, chk_var, combo, entry), cond in zip(self.component_list, self.create_condition_list):
-            cache = crawler_processor.get_select_stock_cache_to_sql(cond)
+            cache = self.crawler_processor.get_select_stock_cache_to_sql(cond)
             chk_var.set(bool(cache["activate"][0]))
             if chk_var.get():
                 entry.insert(0, str(cache["cond_value"][0]) or "")
@@ -450,11 +457,11 @@ class SelectStockPage(BaseTemplateFrame):
                 entry.delete(0, "end")
                 combo.delete(0, "end")
 
-        sp_cache = crawler_processor.get_select_stock_cache_to_sql("停利")
-        sl_cache = crawler_processor.get_select_stock_cache_to_sql("停損")
-        self.start.insert(0, crawler_processor.get_select_stock_cache_to_sql("選股日期:")["cond_value"][0])
-        self.end.insert(0, crawler_processor.get_select_stock_cache_to_sql("回測起始日期:")["cond_value"][0])
-        self.period.insert(0, crawler_processor.get_select_stock_cache_to_sql("週期天數:")["cond_value"][0])
+        sp_cache = self.crawler_processor.get_select_stock_cache_to_sql("停利")
+        sl_cache = self.crawler_processor.get_select_stock_cache_to_sql("停損")
+        self.start.insert(0, self.crawler_processor.get_select_stock_cache_to_sql("選股日期:")["cond_value"][0])
+        self.end.insert(0, self.crawler_processor.get_select_stock_cache_to_sql("回測起始日期:")["cond_value"][0])
+        self.period.insert(0, self.crawler_processor.get_select_stock_cache_to_sql("週期天數:")["cond_value"][0])
         self.sp_chk_var.set(bool(sp_cache["activate"][0]))
         self.sl_chk_var.set(bool(sl_cache["activate"][0]))
         self.sp_entry.insert(0, sp_cache["cond_value"][0] or "")
@@ -469,7 +476,7 @@ class SelectStockPage(BaseTemplateFrame):
             entry.delete(0, "end")
 
     def _show_result_and_handle_excel(self):
-        existed = self._get_file_id()[0]
+        existed = self._get_files_id()[0]
         folder_path = os.path.join(self.path, "選股結果")
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
@@ -488,6 +495,7 @@ class StockAnalysisPage(Frame):
         Frame.__init__(self, master)
         Frame.configure(self, bg='pink')
         try:
+            conn = sqlite3.connect(db_path)
             self.data_getter = TWStockRetrieveModule(conn)
         except Exception as e:
             print("database is not connected: {}".format(e))
@@ -692,16 +700,9 @@ if __name__ == "__main__":
     sys_conn = sqlite3.connect(sys_db_path)
     sys_processor = SystemProcessor(sys_conn)
 
-    try:
-        conn = None
-        crawler_processor = CrawlerProcessor(conn, None)
-        select_stock = SelectStock(conn, None)
-    except Exception as e:
-        print("no db connect: {}".format(e))
-        conn = None
-        crawler_processor = None
-        select_stock = None
+    db_path = ""
 
+    async_loop = asyncio.get_event_loop()
     root = StockApp()
-
     root.mainloop()
+
