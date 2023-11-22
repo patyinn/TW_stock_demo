@@ -382,7 +382,6 @@ class SelectStockPage(BaseTemplateFrame):
     # 顯示執行項目
     @call_by_async
     async def execute_func(self):
-        print("開始執行")
         msg_queue.put("開始執行")
 
         conn = sqlite3.connect(db_path)
@@ -390,7 +389,7 @@ class SelectStockPage(BaseTemplateFrame):
         select_stock = SelectStock(conn, msg_queue)
         sub_sys_conn = sqlite3.connect(sys_db_path)
         sub_sys_processor = SystemProcessor(sub_sys_conn)
-        print("連接上db")
+
         msg_queue.put("連接上db")
         self._save_select_stock_condition(crawler_processor)
 
@@ -398,7 +397,6 @@ class SelectStockPage(BaseTemplateFrame):
         directory = self.path_text.get()
         sub_sys_processor.save_path_sql(path)
         sub_sys_processor.save_path_sql(directory, source="select_stock")
-        print("儲存完選股條件及路徑資料")
         msg_queue.put("儲存完選股條件及路徑資料")
 
         date = datetime.strptime(self.start.get(), "%Y-%m-%d")
@@ -416,10 +414,12 @@ class SelectStockPage(BaseTemplateFrame):
     # 回測功能
     @call_by_async
     async def backtest_func(self):
+        msg_queue.put("開始執行")
         conn = sqlite3.connect(db_path)
         crawler_processor = CrawlerProcessor(conn, msg_queue)
         select_stock = SelectStock(conn, msg_queue)
         self._save_select_stock_condition(crawler_processor)
+        msg_queue.put("連接上db, 開始執行回測")
 
         start = datetime.strptime(self.end.get(), "%Y-%m-%d")
         end = datetime.strptime(self.start.get(), "%Y-%m-%d")
@@ -435,11 +435,6 @@ class SelectStockPage(BaseTemplateFrame):
             stop_loss=sl, stop_profit=sp
         )
 
-        for txt in process:
-            msg_queue.put(txt)
-
-        msg_queue.put('每次換手最大報酬 : %.2f ％' % max_profit)
-        msg_queue.put('每次換手最少報酬 : %.2f ％' % min_profit)
         msg_queue.put('交易利潤 :\n {}\n'.format(profit))
         msg_queue.put('交易紀錄 :\n {}\n'.format(record))
         msg_queue.put("完成")
