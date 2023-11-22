@@ -19,7 +19,7 @@ from openpyxl.styles import Font
 from openpyxl.styles import PatternFill
 from openpyxl.styles import Side
 
-from finlab.crawler_module import Crawler
+from finlab.crawler_module import Crawler, CrawlerConnection
 from finlab.data_module import RetrieveDataModule
 
 
@@ -156,7 +156,7 @@ class CrawlerProcessor(Crawler):
         return pd.DataFrame()
 
 
-class FinancialAnalysis(RetrieveDataModule):
+class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
     def __init__(self, db_path, msg_queue, file_path):
         self.file_path = file_path
         self.wb = load_workbook(self.file_path)
@@ -381,7 +381,7 @@ class FinancialAnalysis(RetrieveDataModule):
         print("完成更新 {} 的 月報".format(stock_id))
         self.msg_queue.put("完成更新 {} 的 月報".format(stock_id))
 
-    async def update_directors_and_supervisors(self, stock_id, path=None):
+    async def _update_directors_and_supervisors(self, stock_id, path=None):
         # 設定headers
         headers = {
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.105 Safari/537.36'
@@ -390,6 +390,67 @@ class FinancialAnalysis(RetrieveDataModule):
         url = "https://goodinfo.tw/StockInfo/StockDirectorSharehold.asp?STOCK_ID=" + str(stock_id)
         r = requests.get_data(url, headers=headers)
         r.encoding = "utf-8"
+
+        dfs = pd.read_html(StringIO(r.text))
+        df = pd.concat([df for df in dfs if df.shape[1] > 15 and df.shape[0] > 30])
+        idx = pd.IndexSlice
+        df = df.loc[idx[:], idx[["月別", "全體董監持股"], :]]
+        df.columns = df.columns.get_level_values(1)
+        df = df.set_index(["月別"])
+        df.columns = df.columns.str.replace(' ', '')
+
+        df["持股(%)"] = pd.to_numeric(df["持股(%)"], errors="coerce")
+        df = df[~ df["持股(%)"].isnull()].dropna()["持股(%)"]
+
+        def change_name(string):
+            dt_obj = datetime.datetime.strptime(string, '%Y/%m')
+            dt_str = datetime.datetime.strftime(dt_obj, '%Y-%m')
+            return dt_str
+
+        df = df.rename(index=lambda s: change_name(s))
+        data = []
+        index = []
+        for cell in list(self.ws0.columns)[9]:
+            data.append(cell.value)
+        data = data[4:]
+        for cell in list(self.ws0.columns)[0]:
+            index.append(cell.value)
+        index = index[4:]
+
+        data_now = pd.DataFrame({'date': index, 'Data': data})
+        data_now = data_now[data_now['date'].notnull()].rename(index=lambda s: s + 5)
+
+        # 確認爬蟲到的最新資料是否與excel的資料時間點相同，沒有就刪除excel資料點
+        while datetime.datetime.strftime(data_now['date'].iloc[0], "%Y-%m") != df.index[0]:
+            data_now = data_now.drop(data_now.index[0])
+        update_data = data_now[data_now['Data'].isnull()]
+
+        pd.options.mode.chained_assignment = None
+
+        for n in range(len(update_data)):
+            date = update_data['date'].iloc[n]
+            date_str = datetime.datetime.strftime(date, "%Y-%m")
+            try:
+                update_data['Data'].iloc[n] = df.loc[date_str]
+                r = update_data.index[n]
+                if self.ws0.cell(row=r, column=1).value == date:
+                    self.ws0.cell(row=r, column=10).value = update_data['Data'].iloc[n]
+                    self.ws0.cell(row=r, column=10).alignment = Alignment(horizontal="center", vertical="center",
+                                                                          wrap_text=True)
+                    print(f"更新月份: {date_str} 的股東占比: {str(self.ws0.cell(row=r, column=10).value)}")
+                    self.msg_queue.put(f"更新月份: {date_str} 的股東占比: {str(self.ws0.cell(row=r, column=10).value)}")
+            except Exception as e:
+                print(f"Doesn't get {date_str} Data")
+                self.msg_queue.put(f"Doesn't get {date_str} Data")
+
+        self.wb.save(path or self.file_path)
+        await asyncio.sleep(1)
+        print("完成更新 {} 的 股東占比".format(stock_id))
+        self.msg_queue.put("完成更新 {} 的 股東占比".format(stock_id))
+
+    async def update_directors_and_supervisors(self, stock_id, path=None):
+        url = "https://goodinfo.tw/StockInfo/StockDirectorSharehold.asp?STOCK_ID={}".format(str(stock_id))
+        r = self.requests_get(url)
 
         dfs = pd.read_html(StringIO(r.text))
         df = pd.concat([df for df in dfs if df.shape[1] > 15 and df.shape[0] > 30])
@@ -485,10 +546,10 @@ class FinancialAnalysis(RetrieveDataModule):
             depreciation = self.get_data_assign_table("折舊費用", get_data_num, table="cash_flows") * 0.00001  # 單位: 億
             net_income = self.get_data_assign_table('本期淨利（淨損）', get_data_num) * 0.00001  # 單位: 億
             # 修正：因為有些股東權益的名稱叫作「權益總計」有些叫作「權益總額」，所以要先將這兩個dataframe合併起來喔！
-            total_stockholders_equity = self.get_data_assign_table('權益總計', get_data_num)
+            shareholders_equity = self.get_data_assign_table('權益總計', get_data_num)
             total_equity = self.get_data_assign_table('權益總額', get_data_num)
             # 把它們合併起來（將「權益總計」為NaN的部分填上「權益總額」）
-            shareholders_equity = total_stockholders_equity.fillna(total_equity, inplace=False) * 0.00001  # 單位: 億
+            shareholders_equity.fillna(total_equity, inplace=False) * 0.00001  # 單位: 億
 
             price_num = add_column_num * 65
             price = self.get_data_assign_table("收盤價", price_num)
@@ -1302,14 +1363,13 @@ class SelectStock(RetrieveDataModule):
         three_yrs_cash_flow = (df1 + df2).iloc[-12:].mean()
 
         net_profit_after_tax = self.get_data(name='本期淨利（淨損）', n=9, start=date)
-        # 股東權益，有兩個名稱，有些公司叫做權益總計，有些叫做權益總額
-        # 所以得把它們抓出來
+        # 股東權益，有兩個名稱，有些公司叫做權益總計，有些叫做權益總額，所以得把它們抓出來
         total_stockholders_equity = self.get_data(name='權益總計', n=1, start=date)
         total_equity = self.get_data(name='權益總額', n=1, start=date)
         # 並且把它們合併起來
-        shareholders_equity = total_stockholders_equity.fillna(total_equity, inplace=True)
+        total_stockholders_equity.fillna(total_equity, inplace=True)
 
-        return_on_equity = ((net_profit_after_tax.iloc[-4:].sum()) / shareholders_equity.iloc[-1]) * 100
+        return_on_equity = ((net_profit_after_tax.iloc[-4:].sum()) / total_stockholders_equity.iloc[-1]) * 100
 
         operating_profit = self.get_data(name='營業利益（損失）', n=9, start=date)
         revenue_season = self.get_data(name='營業收入合計', n=9, start=date)
