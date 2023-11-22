@@ -697,9 +697,9 @@ if __name__ == "__main__":
 
     db_path = ""
 
-    async_loop = asyncio.get_event_loop()
-    if not async_loop:
-        async_loop = asyncio.new_event_loop()
+    async_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(async_loop)
+
     root = StockApp()
     root.mainloop()
 
