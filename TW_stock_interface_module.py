@@ -174,7 +174,7 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
                 folder_path = os.path.join(self.path_text.get(), "自選新增")
                 self.save_excel(stock_id, folder=folder_path)
                 file_path = os.path.join(folder_path, "O_" + stock_id + "_財報分析.xlsx")
-                time.sleep(0.5)
+                await asyncio.sleep(0.5)
             else:
                 file_path = files_id_to_path[stock_id]
 
