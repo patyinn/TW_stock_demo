@@ -10,7 +10,7 @@ from datetime import datetime
 from openpyxl import load_workbook
 
 from tkinter import Button, Label, StringVar, W, E, N, S, NSEW, Frame
-from tkinter import ttk, scrolledtext, WORD, INSERT, filedialog
+from tkinter import ttk, scrolledtext, WORD, END, filedialog
 
 from TW_stock_module import CrawlerProcessor
 from utils import call_by_async
@@ -63,7 +63,7 @@ class BaseFrame(Frame):
             if not msg_queue.empty():
                 msg = msg_queue.get()
                 if isinstance(msg, tuple):
-                    insert_position = self.scroll_txt.index(INSERT)
+                    insert_position = self.scroll_txt.index(END)
                     line, column = map(int, insert_position.split("."))
                     if _pbar_line:
                         del_line = line-_pbar_line
@@ -71,9 +71,9 @@ class BaseFrame(Frame):
                         _pbar_line = line - 1
                     else:
                         _pbar_line = line
-                    self.scroll_txt.insert(INSERT, f"{msg[0]}\n")
+                    self.scroll_txt.insert(END, f"{msg[0]}\n")
                 else:
-                    self.scroll_txt.insert(INSERT, f"{msg}\n")
+                    self.scroll_txt.insert(END, f"{msg}\n")
                 msg_queue.task_done()
 
             # 繼續定期檢查
@@ -119,7 +119,6 @@ class BaseScrapperFrame(BaseFrame):
             values=self.crawler_processor.date_func(table=self.table_name, pattern="to")))
         self.create_crawler_widgets()
         self.create_common_widgets()
-
 
     def create_crawler_widgets(self):
         # 選擇要爬取的資料型態

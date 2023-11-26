@@ -177,7 +177,8 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
                 await asyncio.sleep(0.5)
             else:
                 file_path = files_id_to_path[stock_id]
-
+            msg_queue.put("開始更新 {}".format(stock_id))
+            print("開始更新 {}".format(stock_id))
             await self._execute_finance_analysis(job, stock_id, file_path)
 
         msg_queue.put("財報更新完成")
@@ -217,6 +218,8 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
                 fsa.update_per(stock_id),
             ]
         )
+
+        # await fsa.update_per(stock_id)
         try:
             await asyncio.gather(*_all_work, return_exceptions=True)
         except Exception as e:

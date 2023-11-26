@@ -283,7 +283,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
         # 抓每年的Q4與最後一筆
         q4_data = raw_data[raw_data.index.month == 3]
         df_data = pd.concat([q4_data, raw_data.iloc[-1:]]).drop_duplicates()
-        df_data.index = [datetime(idx.year - 1, idx.month, 1) if idx.month == 3 else idx for idx in df_data.index]
+        df_data.index = [datetime.datetime(idx.year - 1, idx.month, 1) if idx.month == 3 else idx for idx in df_data.index]
         return df_data
 
     async def _update_monthly_report(self, stock_id, path=None):
@@ -454,7 +454,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                     )
                     if col in ['上月比較增減(%)', '去年同月增減(%)']:
                         self.warning_func(
-                            df.loc[update_month, col] >=0,
+                            df.loc[update_month, col] >= 0,
                             sheet=self.ws0,
                             rows=pos[0],
                             cols=pos[1],
@@ -476,9 +476,9 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                     string="最低股價", date=f"{update_month_str}"
                 )
 
-                self.wb.save(path or self.file_path)
-                print("完成更新 {} 的 月報".format(stock_id))
-                self.msg_queue.put("完成更新 {} 的 月報".format(stock_id))
+            self.wb.save(path or self.file_path)
+            print("完成更新 {} 的 月報".format(stock_id))
+            self.msg_queue.put("完成更新 {} 的 月報".format(stock_id))
 
     async def _update_directors_and_supervisors(self, stock_id, path=None):
         # 設定headers
@@ -992,7 +992,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             price_num = add_column_num * 65
             price = self.get_data_assign_table("收盤價", price_num)
             price = price[stock_id]
-            season_report_price = price[[df.index.tolist()]]
+            season_report_price = price[price.index.isin(df.index)]
 
             '''        拆解數據處理        '''
             df["遞減折舊費用"] = df.loc[:, ["折舊費用"]].apply(lambda x: self.data_process(x, cum=False))
@@ -1084,7 +1084,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             add_column_num *= -1
             for add_row in range(add_column_num, 0, 1):
                 self.ws1.insert_cols(5, amount=1)
-                update_season_date = revenue_season.index[add_row]
+                update_season_date = df["營業收入合計"].index[add_row]
                 update_season_str = update_season_date.strftime('%Y-%m-%d')
 
                 '''  新增季度標籤  '''
@@ -1098,6 +1098,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                     self.write_to_excel(
                         df.loc[update_season_date, data[0]],
                         sheet=self.ws1,
+                        round_num=2,
                         rows=data[1],
                         cols=data[2],
                         string=data[3],
@@ -1123,10 +1124,10 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                                     cols=data[2],
                                     threat=False
                                 )
-            self.wb.save(path or self.file_path)
 
-        print("完成更新 {} 的 季報".format(stock_id))
-        self.msg_queue.put("完成更新 {} 的 季報".format(stock_id))
+            self.wb.save(path or self.file_path)
+            print("完成更新 {} 的 季報".format(stock_id))
+            self.msg_queue.put("完成更新 {} 的 季報".format(stock_id))
 
     async def _update_cash_flow(self, stock_id, path=None):
         '''    從資料庫獲取季報最新日期    '''
@@ -1529,9 +1530,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
 
         # 新增PER資料
         add_row_num *= -1
-
         for add_row in range(add_row_num, 0, 1):
-
             self.ws4.insert_rows(16, amount=1)
 
             update_season_date = estimated_eps.index[add_row]
@@ -1547,7 +1546,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             self.msg_queue.put(f"新增標籤: {self.ws4.cell(row=16, column=1).value}")
 
             '''  新增本益比  '''
-            if update_season:
+            try:
                 if update_season[-1] == "1":
                     price = price_q1.loc[update_season[0:4]][-1]
                 elif update_season[-1] == "2":
@@ -1556,7 +1555,9 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                     price = price_q3.loc[update_season[0:4]][-1]
                 else:
                     price = price_q4.loc[update_season[0:4]][-1]
-            else:
+            except Exception as e:
+                print(f"有問題發生，請檢查{e}")
+                self.msg_queue.put(f"有問題發生，請檢查{e}")
                 price = 0.0
             e_eps = estimated_eps.loc[update_season]
             per = price / e_eps
