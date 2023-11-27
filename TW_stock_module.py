@@ -458,7 +458,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                             sheet=self.ws0,
                             rows=pos[0],
                             cols=pos[1],
-                            threat=True
+                            threat=False
                         )
 
                 '''        更新當月最高、最低、平均收盤價        '''
@@ -998,22 +998,24 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             df["遞減折舊費用"] = df.loc[:, ["折舊費用"]].apply(lambda x: self.data_process(x, cum=False))
             '''        累積數據處理        '''
             df["累積股東權益報酬率(季)"] = self.data_process((df["本期淨利（淨損）"] / df["權益總計"] * 100), cum=True)
-            df["累積稅後淨利"] = self.data_process((df["本期淨利（淨損）"]), cum=True)
             df["累積季營收"] = self.data_process((df['營業收入合計']), cum=True)
+            df["累積稅後淨利率"] = self.data_process((df["本期淨利（淨損）"]), cum=True) / df["累積季營收"] * 100
             df["累積營收淨值比"] = (df["本期淨利（淨損）"] / df["累積季營收"]) * 100
             df["累積股東權益資產轉換率"] = (df["權益總計"] / df["資產總計"]) * 100
             df["累積資產變化"] = self.data_process((df["資產總計"] + df["資產總計"].shift(1)) / 2, cum=True)
+            print(df["累積資產變化"], df["累積季營收"]) # for test
             df["總資產週轉率(次/年)"] = df["累積季營收"] / df["累積資產變化"] * 4
 
             '''        處理需要放到excel的資料        '''
             df["季營收年增率"] = 100 * (df["營業收入合計"] / df["營業收入合計"].shift(4)) - 100
             df["營業毛利率"] = 100 * (df["營業毛利（毛損）"] / df["營業收入合計"])
             df["營業利益率"] = 100 * (df["營業利益（損失）"] / df["營業收入合計"])
-            df["營業利益成長率"] = 100 * (df["營業收入合計"] / df["營業收入合計"].shift(1)) - 100
+            df["營業利益成長率"] = 100 * (df["營業利益率"] / df["營業利益率"].shift(1)) - 100
             df["股本季增率"] = 100 * (df["股本合計"] / df["股本合計"].shift(1)) - 100
             df["市值"] = season_report_price * df["股本合計"] / 10  # 市值 = 股價 * 總股數 (股本合計單位為 k元)
             df["營收市值比"] = df["營業收入合計"].rolling(4).sum() / df["市值"] * 100
-            df["本業收入比率"] = 100 * (df["營業利益率"] / df["繼續營業單位稅前淨利（淨損）"])
+            df["稅前淨利率"] = 100 * (df["繼續營業單位稅前淨利（淨損）"] / df["營業收入合計"])
+            df["本業收入比率"] = 100 * (df["營業利益（損失）"] / df["繼續營業單位稅前淨利（淨損）"])
             df["稅後淨利率"] = 100 * (df["本期淨利（淨損）"] / df["營業收入合計"])
             df["稅後淨利年增率"] = 100 * (df["稅後淨利率"] / df["稅後淨利率"].shift(4)) - 100
             df["每股稅後盈餘"] = df["本期淨利（淨損）"] / (df["股本合計"] / 10)
@@ -1025,7 +1027,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             df["供應商應付帳款總資產占比"] = 100 * (df["應付帳款"] / df["資產總計"])
             df["負債總資產占比"] = 100 * (df["負債總計"] / df["資產總計"])
             df["無形資產占比"] = 100 * (df["無形資產"] / df["資產總計"])
-            df["股東權益報酬率(年預估)"] = df.loc[:, ["營業利益率"]].apply(self._estimate_roe, axis=1)
+            df["股東權益報酬率(年預估)"] = df.loc[:, ["累積股東權益報酬率(季)"]].apply(self._estimate_roe, axis=1)
             df["權益係數"] = 100 / df["累積股東權益資產轉換率"]
 
             condition_df = pd.DataFrame()
@@ -1046,7 +1048,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                 "每股稅後盈餘年成長率": [df["每股稅後盈餘年成長率"] < 0],
                 "負債總資產占比": [df["負債總資產占比"] > 40],
                 "無形資產占比": [df["無形資產占比"] > 10, df["無形資產占比"] > 30],
-                "每股稅後盈餘年成長率": [df["折舊負擔比率"] > df["營業利益率"]],
+                "折舊負擔比率": [df["折舊負擔比率"] > df["營業利益率"]],
             }
 
             write_df_to_excel = [
@@ -1059,7 +1061,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                 ("股本季增率", 22, 5, "股本季增率",),
                 ("市值", 5, 5, "市值",),
                 ("營收市值比", 19, 5, "營收市值比",),
-                ("繼續營業單位稅前淨利（淨損）", 9, 5, "稅前淨利率",),
+                ("稅前淨利率", 9, 5, "稅前淨利率",),
                 ("本業收入比率", 10, 5, "本業收入比率",),
                 ("稅後淨利率", 11, 5, "稅後淨利率",),
                 ("稅後淨利年增率", 12, 5, "稅後淨利年增率",),
@@ -1075,7 +1077,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                 ("無形資產占比", 25, 5, "無形資產占比",),
                 ("累積股東權益報酬率(季)", 30, 5, "股東權益報酬率(季)",),
                 ("股東權益報酬率(年預估)", 31, 5, "股東權益報酬率(年預估)",),
-                ("累積稅後淨利", 32, 5, "稅後淨利率(累計)",),
+                ("累積稅後淨利率", 32, 5, "稅後淨利率(累計)",),
                 ("累積資產變化", 33, 5, "總資產週轉率(次/年)",),
                 ("權益係數", 34, 5, "權益係數",),
                 ("累積股東權益資產轉換率", 35, 5, "股東權益總額(%)",),
@@ -1089,7 +1091,6 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
 
                 '''  新增季度標籤  '''
                 update_season = self.season_determination(update_season_date)
-
                 self.write_to_excel(update_season, sheet=self.ws1, rows=1, cols=5, string="季度標籤",
                                     date=f"{update_season}")
                 self.ws1.cell(row=1, column=5).fill = PatternFill(fill_type="solid", fgColor="DDDDDD")
@@ -1285,8 +1286,8 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             target_cols.append("free_cash_flow")
 
             target_pos = [
-                (3, 4, "營業活動現金"),
                 (4, 4, "理財活動現金"),
+                (3, 4, "營業活動現金"),
                 (6, 4, "籌資活動現金"),
                 (7, 4, "期初現金及約當現金餘額"),
                 (8, 4, "期末現金及約當現金餘額"),
@@ -1458,7 +1459,8 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
 
         # 與table最新資料比對時間，決定需要增加的數據量
         table_month = self.ws4["A16"].value
-        add_row_num = 4 * (int(season_now[0:4]) - int(table_month[0:4])) + (int(season_now[-1]) - int(table_month[-1]))
+        diff_year, diff_season = (int(season_now[0:4]) - int(table_month[0:4])), (int(season_now[-1]) - int(table_month[-1]))
+        add_row_num = 4 * diff_year + diff_season
 
         if add_row_num <= 0:
             print("Update PER this year.")
@@ -1468,30 +1470,22 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             self.msg_queue.put("Increase PER this season and update PER this year.")
 
         # 決定要更新多少當年度的PER，抓取excel同年度資料，寫進Update_row
-        per_data = [self.ws4.cell(row=n, column=1).value[0:4] for n in range(16, 20) if
-                    self.ws4.cell(row=n, column=1).value]
-        update_row = 0
-        for n in per_data:
-            if n == now.strftime("%Y"):
-                update_row += 1
+        update_row_num = 0 if diff_year != 0 else diff_season
 
         # 根據需要跟新以及新增的數量，去從sqlite3抓取相對應的數據量
-        total_num = update_row + add_row_num
+        total_num = update_row_num + add_row_num
         get_data_num = total_num + 4
         equity = self.get_data_assign_table("股本合計", get_data_num) * 0.00001  # 單位: 億
         profit_after_tax = self.get_data_assign_table("本期淨利（淨損）", get_data_num) * 0.00001  # 單位: 億
 
         price_num = total_num * 100
-        price = self.get_data_assign_table("收盤價", price_num)
+        price_df = self.get_data_assign_table("收盤價", price_num)
 
         equity = equity[stock_id].dropna()
         profit_after_tax = profit_after_tax[stock_id].dropna()
-        price = price[stock_id].dropna()
-
-        price_q1 = price[price.index.month.isin([1, 2, 3])].sort_index()
-        price_q2 = price[price.index.month.isin([4, 5, 6])].sort_index()
-        price_q3 = price[price.index.month.isin([7, 8, 9])].sort_index()
-        price_q4 = price[price.index.month.isin([10, 11, 12])].sort_index()
+        price_df = price_df[stock_id].dropna()
+        price_df.index = price_df.index.to_period("Q")
+        price_df = price_df.groupby([price_df.index]).last()
 
         eps = profit_after_tax / (equity / 10)
         estimated_eps = eps.rolling(4).sum()
@@ -1499,72 +1493,40 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
         '''  檢查公布財報的EPS時間與實際時間的差別，如果尚未公布財報則填入現在的時間，新增最新時間資料  '''
         fr_date = self.season_transform(estimated_eps.index[-1])
         num = 4 * (int(season_now[0:4]) - int(fr_date[0:4])) + (int(season_now[-1]) - int(fr_date[-1]))
-
         for n in range(num):
             date = self.delta_seasons(estimated_eps.index[-1], -1)
             estimated_eps[date] = estimated_eps[-1]
 
         estimated_eps.index = self.season_transform(estimated_eps.index, spec=True)
 
-        start = 16
-        end = 16 + update_row
-        # 更新今年度的PER
-        for add_row in range(start, end):
-            # 從財報上資料判斷要更新的季節
-            update_season = str(self.ws4.cell(row=add_row, column=1).value)
-            if update_season[-1] == "1":
-                price = price_q1.loc[update_season[0:4]][-1]
-            elif update_season[-1] == "2":
-                price = price_q2.loc[update_season[0:4]][-1]
-            elif update_season[-1] == "3":
-                price = price_q3.loc[update_season[0:4]][-1]
-            else:
-                price = price_q4.loc[update_season[0:4]][-1]
-            e_eps = estimated_eps.loc[update_season]
-            per = price / e_eps
-
-            print(f"更新 {self.ws4.cell(row=add_row, column=1).value} 的EPS: {round(e_eps, 2)}")
-            self.msg_queue.put(f"更新 {self.ws4.cell(row=add_row, column=1).value} 的EPS: {round(e_eps, 2)}")
-            self.write_to_excel(per, round_num=2, sheet=self.ws4, rows=add_row, cols=2, string="更新PER",
-                                date=update_season)
-
         # 新增PER資料
-        add_row_num *= -1
-        for add_row in range(add_row_num, 0, 1):
-            self.ws4.insert_rows(16, amount=1)
+        for add_row in range(-1*total_num, 0, 1):
+            row = 16 + update_row_num if add_row < -1*update_row_num else 16
+            if row != 16:
+                self.ws4.insert_rows(16, amount=1)
 
             update_season_date = estimated_eps.index[add_row]
 
             '''  新增季度標籤  '''
             update_season = self.season_transform(update_season_date)
-
-            self.ws4.cell(row=16, column=1).value = update_season
-            self.ws4.cell(row=16, column=1).alignment = Alignment(horizontal="center", vertical="center",
-                                                                  wrap_text=True)
-            self.ws4.cell(row=16, column=1).fill = PatternFill(fill_type="solid", fgColor="FFEE99")
-            print(f"新增標籤: {self.ws4.cell(row=16, column=1).value}")
-            self.msg_queue.put(f"新增標籤: {self.ws4.cell(row=16, column=1).value}")
+            self.write_to_excel(update_season, sheet=self.ws4, rows=row, cols=1, string="PER季度標籤",
+                                date=f"{update_season}")
+            self.ws4.cell(row=row, column=1).fill = PatternFill(fill_type="solid", fgColor="DDDDDD")
 
             '''  新增本益比  '''
             try:
-                if update_season[-1] == "1":
-                    price = price_q1.loc[update_season[0:4]][-1]
-                elif update_season[-1] == "2":
-                    price = price_q2.loc[update_season[0:4]][-1]
-                elif update_season[-1] == "3":
-                    price = price_q3.loc[update_season[0:4]][-1]
-                else:
-                    price = price_q4.loc[update_season[0:4]][-1]
+                price = price_df.loc[update_season]
             except Exception as e:
                 print(f"有問題發生，請檢查{e}")
                 self.msg_queue.put(f"有問題發生，請檢查{e}")
                 price = 0.0
+
             e_eps = estimated_eps.loc[update_season]
             per = price / e_eps
 
             print(f"使用季度: {update_season} 所得到的EPS: {round(e_eps, 2)}")
             self.msg_queue.put(f"使用季度: {update_season} 所得到的EPS: {round(e_eps, 2)}")
-            self.write_to_excel(per, round_num=2, sheet=self.ws4, rows=16, cols=2, string="新增PER", date=update_season)
+            self.write_to_excel(per, round_num=2, sheet=self.ws4, rows=row, cols=2, string="新增PER", date=update_season)
 
         self.wb.save(path or self.file_path)
         print("完成更新 {} 的 本益比".format(stock_id))
