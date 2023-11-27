@@ -1003,7 +1003,6 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             df["累積營收淨值比"] = (df["本期淨利（淨損）"] / df["累積季營收"]) * 100
             df["累積股東權益資產轉換率"] = (df["權益總計"] / df["資產總計"]) * 100
             df["累積資產變化"] = self.data_process((df["資產總計"] + df["資產總計"].shift(1)) / 2, cum=True)
-            print(df["累積資產變化"], df["累積季營收"]) # for test
             df["總資產週轉率(次/年)"] = df["累積季營收"] / df["累積資產變化"] * 4
 
             '''        處理需要放到excel的資料        '''
@@ -1078,7 +1077,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                 ("累積股東權益報酬率(季)", 30, 5, "股東權益報酬率(季)",),
                 ("股東權益報酬率(年預估)", 31, 5, "股東權益報酬率(年預估)",),
                 ("累積稅後淨利率", 32, 5, "稅後淨利率(累計)",),
-                ("累積資產變化", 33, 5, "總資產週轉率(次/年)",),
+                ("總資產週轉率(次/年)", 33, 5, "總資產週轉率(次/年)",),
                 ("權益係數", 34, 5, "權益係數",),
                 ("累積股東權益資產轉換率", 35, 5, "股東權益總額(%)",),
             ]
@@ -1501,8 +1500,8 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
 
         # 新增PER資料
         for add_row in range(-1*total_num, 0, 1):
-            row = 16 + update_row_num if add_row < -1*update_row_num else 16
-            if row != 16:
+            row = 16 + -1*(add_row+update_row_num) if add_row + update_row_num < -1*add_row_num else 16
+            if row == 16:
                 self.ws4.insert_rows(16, amount=1)
 
             update_season_date = estimated_eps.index[add_row]

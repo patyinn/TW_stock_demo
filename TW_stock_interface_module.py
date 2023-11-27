@@ -169,11 +169,14 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
             stock_id_list = str(symbol).replace(" ", ",").split(",")
             stock_id_list = [i for i in stock_id_list if i.isdigit()]
 
+        folder_path = os.path.join(self.path_text.get(), "自選新增")
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+
         for stock_id in stock_id_list:
             if stock_id not in files_id:
-                folder_path = os.path.join(self.path_text.get(), "自選新增")
                 self.save_excel(stock_id, folder=folder_path)
-                file_path = os.path.join(folder_path, "O_" + stock_id + "_財報分析.xlsx")
+                file_path = os.path.join(folder_path, f"O_{stock_id}_財報分析.xlsx")
                 await asyncio.sleep(0.5)
             else:
                 file_path = files_id_to_path[stock_id]
@@ -211,7 +214,7 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
         elif job == "更新PER與今日價位":
             _all_work = []
         elif job == "更新股東占比":
-            _all_work = [fsa.update_directors_and_supervisors]
+            _all_work = [fsa.update_directors_and_supervisors(stock_id)]
         _all_work.extend(
             [
                 fsa.update_price_today(stock_id),
@@ -219,7 +222,7 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
             ]
         )
 
-        # await fsa.update_per(stock_id)
+        # await fsa.update_season_report(stock_id)
         try:
             await asyncio.gather(*_all_work, return_exceptions=True)
         except Exception as e:
