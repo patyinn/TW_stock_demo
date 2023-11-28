@@ -368,8 +368,8 @@ class SelectStockPage(BaseTemplateFrame):
     def _save_select_stock_condition(self):
         for chk, chk_var, combo, entry in self.component_list:
             self.chk_list.append(chk.cget("text"))
-            self.chk_var_list.append(chk_var.get() if chk_var else chk_var)
-            self.combo_list.append(combo.get() if combo else combo)
+            self.chk_var_list.append(chk_var.get() if chk_var else "")
+            self.combo_list.append(combo.get() if combo else "")
             self.entry_list.append(entry.get())
             content = f"""{chk.cget("text")} {combo.get()} {entry.get()}""" if combo else None
             self.content_list.append(content)
@@ -383,11 +383,10 @@ class SelectStockPage(BaseTemplateFrame):
         msg_queue.put("開始執行")
 
         conn = sqlite3.connect(db_path)
-        crawler_processor = CrawlerProcessor(conn, msg_queue)
         select_stock = SelectStock(conn, msg_queue)
 
         msg_queue.put("連接上db")
-        self._save_select_stock_condition(crawler_processor)
+        self._save_select_stock_condition()
 
         msg_queue.put("儲存完選股條件及路徑資料")
 
@@ -408,9 +407,8 @@ class SelectStockPage(BaseTemplateFrame):
     async def backtest_func(self):
         msg_queue.put("開始執行")
         conn = sqlite3.connect(db_path)
-        crawler_processor = CrawlerProcessor(conn, msg_queue)
         select_stock = SelectStock(conn, msg_queue)
-        self._save_select_stock_condition(crawler_processor)
+        self._save_select_stock_condition()
         msg_queue.put("連接上db, 開始執行回測")
 
         start = datetime.strptime(self.end.get(), "%Y-%m-%d")
@@ -451,8 +449,8 @@ class SelectStockPage(BaseTemplateFrame):
         self.period.insert(0, self.sys_processor.get_select_stock_cache_to_sql("週期天數:")["cond_value"])
         self.sp_chk_var.set(sp_cache["activate"])
         self.sl_chk_var.set(sl_cache["activate"])
-        self.sp_entry.insert(0, sp_cache["cond_value"] or "")
-        self.sl_entry.insert(0, sl_cache["cond_value"] or "")
+        self.sp_entry.insert(0, sp_cache["cond_value"])
+        self.sl_entry.insert(0, sl_cache["cond_value"])
 
     # 清除顯示
     def clear_func(self):

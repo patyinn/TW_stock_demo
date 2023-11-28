@@ -72,6 +72,7 @@ class SystemProcessor:
                 f.truncate()
 
     def save_path_sql(self, path, source="origin"):
+        key, value = None, None
         if os.path.exists(path):
             if os.path.isdir(path):
                 if source == "origin":
@@ -89,9 +90,8 @@ class SystemProcessor:
                     value = path
             else:
                 print("it's an invalid path")
-                return
-
-        self._write_to_json("path", key, value)
+        if key and value:
+            self._write_to_json("path", key, value)
 
     def get_latest_path_sql(self, category):
         result = self._read_from_json("path", category)
@@ -101,14 +101,15 @@ class SystemProcessor:
         self._del_from_json("path", category, path)
 
     def save_select_stock_cache_to_sql(self, combination):
-        cond_dic = {
-            "cond_name": combination[0],
-            "activate": combination[1],
-            "cond_content": combination[2],
-            "operator": combination[3],
-            "cond_value": combination[4]
-        }
-        self._write_to_json("condition", cond_dic["cond_name"], cond_dic)
+        for com in zip(*combination):
+            cond_dic = {
+                "cond_name": com[0],
+                "activate": com[1],
+                "cond_content": com[2],
+                "operator": com[3],
+                "cond_value": com[4]
+            }
+            self._write_to_json("condition", cond_dic["cond_name"], cond_dic)
 
     def get_select_stock_cache_to_sql(self, condition):
         result = self._read_from_json("condition", condition)
@@ -117,7 +118,7 @@ class SystemProcessor:
             "activate": False,
             "cond_content": "",
             "operator": "",
-            "cond_value": None
+            "cond_value": ""
         }
 
     # 把列出資料夾的程式碼寫成一個函式

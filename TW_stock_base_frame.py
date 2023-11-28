@@ -209,7 +209,7 @@ class BaseTemplateFrame(BaseFrame):
         self.path_combo.grid(row=1, column=1, columnspan=3, sticky=W + E + N + S)
         path_btn = Button(self, text='請選擇檔案', command=self.get_path)
         path_btn.grid(row=1, column=4, sticky=W + E + N + S)
-        del_path_btn = Button(self, text='刪除紀錄', command=self.del_path(category=self.directory_type))
+        del_path_btn = Button(self, text='刪除紀錄', command=self.del_path)
         del_path_btn.grid(row=1, column=5, sticky=W + E + N + S)
 
     # 刪除已儲存的樣板路徑
@@ -227,7 +227,7 @@ class BaseTemplateFrame(BaseFrame):
         self.template_path_combo.delete(0, 'end')
         self.template_path_combo.insert(0, filename)
 
-        self.sys_processor.save_path_sql(self.template_path)
+        self.sys_processor.save_path_sql(filename)
 
     # 欲更新檔案位置
     def get_path(self):
@@ -241,10 +241,10 @@ class BaseTemplateFrame(BaseFrame):
             self.sys_processor.save_path_sql(directory, source="select_stock")
 
     # 刪除已儲存的資料夾路徑
-    def del_path(self, category):
+    def del_path(self):
         if self.path_combo.get():
             path = self.path_combo.get()
-            self.sys_processor.del_path_sql(category, path)
+            self.sys_processor.del_path_sql(self.directory_type, path)
 
     # 以樣板儲存新檔案
     def save_excel(self, stock_id, folder):
