@@ -186,45 +186,37 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
 
         msg_queue.put("財報更新完成")
 
-        path = self.template_path_text.get()
-        directory = self.path_text.get()
-
-        sub_sys_conn = sqlite3.connect(sys_db_path)
-        sub_sys_processor = SystemProcessor(sub_sys_conn)
-        sub_sys_processor.save_path_sql(path)
-        sub_sys_processor.save_path_sql(directory)
-
     async def _execute_finance_analysis(self, job, stock_id, file_path):
         fsa = FinancialAnalysis(db_path, msg_queue, file_path)
 
-        _all_work = [
-            fsa.update_monthly_report(stock_id),
-            fsa.update_season_report(stock_id),
-            fsa.update_cash_flow(stock_id),
+        _all_works = [
+            fsa.update_monthly_report,
+            fsa.update_season_report,
+            fsa.update_cash_flow,
         ]
         if job == "更新月報":
-            _all_work = [
-                fsa.update_monthly_report(stock_id),
+            _all_works = [
+                fsa.update_monthly_report,
             ]
         elif job == "更新季報":
-            _all_work = [
-                fsa.update_season_report(stock_id),
-                fsa.update_cash_flow(stock_id),
+            _all_works = [
+                fsa.update_season_report,
+                fsa.update_cash_flow,
             ]
         elif job == "更新PER與今日價位":
-            _all_work = []
+            _all_works = []
         elif job == "更新股東占比":
-            _all_work = [fsa.update_directors_and_supervisors(stock_id)]
-        _all_work.extend(
+            _all_works = [fsa.update_directors_and_supervisors]
+        _all_works.extend(
             [
-                fsa.update_price_today(stock_id),
-                fsa.update_per(stock_id),
+                fsa.update_price_today,
+                fsa.update_per,
             ]
         )
-
         # await fsa.update_season_report(stock_id)
         try:
-            await asyncio.gather(*_all_work, return_exceptions=True)
+            for work in _all_works:
+                await work(stock_id)
         except Exception as e:
             msg_queue.put("{}發生問題，問題原因: {}".format(stock_id, e))
             print("{}發生問題，問題原因: {}".format(stock_id, e))
@@ -373,7 +365,7 @@ class SelectStockPage(BaseTemplateFrame):
         self.sl_entry = sl_entry
 
     # 選定後，自動帶入上次執行成功的條件
-    def _save_select_stock_condition(self, crawler_processor):
+    def _save_select_stock_condition(self):
         for chk, chk_var, combo, entry in self.component_list:
             self.chk_list.append(chk.cget("text"))
             self.chk_var_list.append(chk_var.get() if chk_var else chk_var)
@@ -382,7 +374,7 @@ class SelectStockPage(BaseTemplateFrame):
             content = f"""{chk.cget("text")} {combo.get()} {entry.get()}""" if combo else None
             self.content_list.append(content)
 
-        crawler_processor.save_select_stock_cache_to_sql(
+        sys_processor.save_select_stock_cache_to_sql(
             (self.chk_list, self.chk_var_list, self.content_list, self.combo_list, self.entry_list))
 
     # 顯示執行項目
@@ -393,16 +385,10 @@ class SelectStockPage(BaseTemplateFrame):
         conn = sqlite3.connect(db_path)
         crawler_processor = CrawlerProcessor(conn, msg_queue)
         select_stock = SelectStock(conn, msg_queue)
-        sub_sys_conn = sqlite3.connect(sys_db_path)
-        sub_sys_processor = SystemProcessor(sub_sys_conn)
 
         msg_queue.put("連接上db")
         self._save_select_stock_condition(crawler_processor)
 
-        path = self.template_path_text.get()
-        directory = self.path_text.get()
-        sub_sys_processor.save_path_sql(path)
-        sub_sys_processor.save_path_sql(directory, source="select_stock")
         msg_queue.put("儲存完選股條件及路徑資料")
 
         date = datetime.strptime(self.start.get(), "%Y-%m-%d")
@@ -449,24 +435,24 @@ class SelectStockPage(BaseTemplateFrame):
     def update_func(self):
         self.clear_func()
         for (chk, chk_var, combo, entry), cond in zip(self.component_list, self.create_condition_list):
-            cache = self.crawler_processor.get_select_stock_cache_to_sql(cond)
-            chk_var.set(bool(cache["activate"][0]))
+            cache = self.sys_processor.get_select_stock_cache_to_sql(cond)
+            chk_var.set(bool(cache["activate"]))
             if chk_var.get():
-                entry.insert(0, str(cache["cond_value"][0]) or "")
-                combo.insert(0, str(cache["operator"][0]) or "")
+                entry.insert(0, str(cache["cond_value"]) or "")
+                combo.insert(0, str(cache["operator"]) or "")
             else:
                 entry.delete(0, "end")
                 combo.delete(0, "end")
 
-        sp_cache = self.crawler_processor.get_select_stock_cache_to_sql("停利")
-        sl_cache = self.crawler_processor.get_select_stock_cache_to_sql("停損")
-        self.start.insert(0, self.crawler_processor.get_select_stock_cache_to_sql("選股日期:")["cond_value"][0])
-        self.end.insert(0, self.crawler_processor.get_select_stock_cache_to_sql("回測起始日期:")["cond_value"][0])
-        self.period.insert(0, self.crawler_processor.get_select_stock_cache_to_sql("週期天數:")["cond_value"][0])
-        self.sp_chk_var.set(bool(sp_cache["activate"][0]))
-        self.sl_chk_var.set(bool(sl_cache["activate"][0]))
-        self.sp_entry.insert(0, sp_cache["cond_value"][0] or "")
-        self.sl_entry.insert(0, sl_cache["cond_value"][0] or "")
+        sp_cache = self.sys_processor.get_select_stock_cache_to_sql("停利")
+        sl_cache = self.sys_processor.get_select_stock_cache_to_sql("停損")
+        self.start.insert(0, self.sys_processor.get_select_stock_cache_to_sql("選股日期:")["cond_value"])
+        self.end.insert(0, self.sys_processor.get_select_stock_cache_to_sql("回測起始日期:")["cond_value"])
+        self.period.insert(0, self.sys_processor.get_select_stock_cache_to_sql("週期天數:")["cond_value"])
+        self.sp_chk_var.set(sp_cache["activate"])
+        self.sl_chk_var.set(sl_cache["activate"])
+        self.sp_entry.insert(0, sp_cache["cond_value"] or "")
+        self.sl_entry.insert(0, sl_cache["cond_value"] or "")
 
     # 清除顯示
     def clear_func(self):
@@ -697,9 +683,8 @@ class StockAnalysisPage(Frame):
 
 
 if __name__ == "__main__":
-    sys_db_path = os.path.join("data", "record.db")
-    sys_conn = sqlite3.connect(sys_db_path)
-    sys_processor = SystemProcessor(sys_conn)
+    sys_db_path = os.path.join("data", "system_record.json")
+    sys_processor = SystemProcessor(sys_db_path)
 
     db_path = ""
 

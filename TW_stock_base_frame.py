@@ -105,11 +105,12 @@ class BaseFrame(Frame):
 
 
 class BaseScrapperFrame(BaseFrame):
-    def __init__(self, master, mode,  db_path,  start_page, table_name, async_loop):
+    def __init__(self, master, mode, db_path,  start_page, table_name, async_loop):
         super().__init__(master, start_page, async_loop)
         self.master = master
         self.mode = mode
-        conn = sqlite3.connect(db_path)
+        self.db_path = db_path
+        conn = sqlite3.connect(self.db_path)
         self.crawler_processor = CrawlerProcessor(conn, msg_queue)
 
         self.table_name = table_name
@@ -158,7 +159,9 @@ class BaseScrapperFrame(BaseFrame):
         msg_queue.put("正在爬取從 {} 至 {} 周期間的 {}".format(cmd[0], cmd[1], self.table_name))
         print("正在爬取從 {} 至 {} 周期間的 {}".format(cmd[0], cmd[1], self.table_name))
 
-        task = asyncio.create_task(self.crawler_processor.exec_func(self.table_name, cmd[0], cmd[1]))
+        conn = sqlite3.connect(self.db_path)
+        crawler_processor_for_thread = CrawlerProcessor(conn, msg_queue)
+        task = asyncio.create_task(crawler_processor_for_thread.exec_func(self.table_name, cmd[0], cmd[1]))
         await task
 
         msg_queue.put("完成爬取從 {} 至 {} 周期間的 {}".format(cmd[0], cmd[1], self.table_name))
@@ -224,12 +227,18 @@ class BaseTemplateFrame(BaseFrame):
         self.template_path_combo.delete(0, 'end')
         self.template_path_combo.insert(0, filename)
 
+        self.sys_processor.save_path_sql(self.template_path)
+
     # 欲更新檔案位置
     def get_path(self):
         directory = filedialog.askdirectory(title='Select directory',
                                             initialdir=self.path)
         self.path_combo.delete(0, 'end')
         self.path_combo.insert(0, directory)
+        if self.directory_type == "directory":
+            self.sys_processor.save_path_sql(directory)
+        else:
+            self.sys_processor.save_path_sql(directory, source="select_stock")
 
     # 刪除已儲存的資料夾路徑
     def del_path(self, category):

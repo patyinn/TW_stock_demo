@@ -1,11 +1,13 @@
 import os
 import re
-import sqlite3
 import math
+import json
+import sqlite3
 import datetime
 import operator
 import requests
 import asyncio
+import threading
 import numpy as np
 import pandas as pd
 
@@ -24,57 +26,99 @@ from finlab.data_module import RetrieveDataModule
 
 
 class SystemProcessor:
-    def __init__(self, sys_conn):
-        self.conn = sys_conn
-        self._check_all_tables()
+    lock = threading.Lock()
 
-    def _check_all_tables(self):
-        self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS path (
-              category VARCHAR(10),
-              path VARCHAR(50)
-            );
-            """
-        )
-        self.conn.commit()
+    def __init__(self, sys_path):
+        self.sys_path = sys_path
+        self._check_file_existed()
+
+    def _check_file_existed(self):
+        if not os.path.exists(os.path.dirname(self.sys_path)):
+            os.makedirs(os.path.dirname(self.sys_path))
+        if not os.path.exists(self.sys_path):
+            with open(self.sys_path, "w") as f:
+                f.write(json.dumps({"path": {}, "condition": {}}, ensure_ascii=False, indent=4))
+
+    def _write_to_json(self, table_name, key, value):
+        with self.lock:
+            with open(self.sys_path, "r+", encoding="UTF-8") as f:
+                origin = json.load(f)
+                if table_name == "path":
+                    origin[table_name].setdefault(key, [])
+                    origin[table_name][key].append(value)
+                    origin[table_name][key] = list(set(origin[table_name][key]))
+                elif table_name == "condition":
+                    origin[table_name].setdefault(key, {})
+                    origin[table_name][key] = value
+
+                f.seek(0)
+                json.dump(origin, f, ensure_ascii=False, indent=4)
+                f.truncate()
+
+    def _read_from_json(self, table_name, key):
+        with self.lock:
+            with open(self.sys_path, "r", encoding="UTF-8") as f:
+                data = json.load(f)
+                return data[table_name].get(key, None)
+
+    def _del_from_json(self, table_name, key, value):
+        with self.lock:
+            with open(self.sys_path, "r+", encoding="UTF-8") as f:
+                origin = json.load(f)
+                if value in origin[table_name].get(key, []):
+                    origin[table_name][key].remove(value)
+                f.seek(0)
+                json.dump(origin, f, ensure_ascii=False, indent=4)
+                f.truncate()
 
     def save_path_sql(self, path, source="origin"):
-        table_name = "path"
-        df = pd.DataFrame()
         if os.path.exists(path):
             if os.path.isdir(path):
                 if source == "origin":
-                    df["category"] = ["directory"]
-                    df["path"] = [path]
+                    key = "directory"
+                    value = path
                 elif source == "select_stock":
-                    df["category"] = ["select_stock_directory"]
-                    df["path"] = [path]
+                    key = "select_stock_directory"
+                    value = path
             elif os.path.isfile(path):
                 if path.endswith(".db"):
-                    df["category"] = ["db"]
-                    df["path"] = [path]
+                    key = "db"
+                    value = path
                 elif path.endswith(".xlsx"):
-                    df["category"] = ["file"]
-                    df["path"] = [path]
+                    key = "file"
+                    value = path
             else:
                 print("it's an invalid path")
-        origin = pd.read_sql("SELECT * FROM {}".format(table_name), self.conn)
-        df = pd.concat([origin, df])
-        df = df.drop_duplicates(subset=["category", "path"], keep='last')
-        df.to_sql(table_name, self.conn, index=False, if_exists='replace')
+                return
+
+        self._write_to_json("path", key, value)
 
     def get_latest_path_sql(self, category):
-        table_name = "path"
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT path FROM {} WHERE category = ?".format(table_name), (category, ))
-        rows = cursor.fetchone()
-        return rows[0] if isinstance(rows, tuple) else ""
+        result = self._read_from_json("path", category)
+        return result[-1] if result else ""
 
     def del_path_sql(self, category, path):
-        table_name = "path"
-        self.conn.execute("DELETE FROM {} WHERE category = ? AND path = ?".format(table_name), (category, path, ))
-        self.conn.commit()
+        self._del_from_json("path", category, path)
+
+    def save_select_stock_cache_to_sql(self, combination):
+        cond_dic = {
+            "cond_name": combination[0],
+            "activate": combination[1],
+            "cond_content": combination[2],
+            "operator": combination[3],
+            "cond_value": combination[4]
+        }
+        self._write_to_json("condition", cond_dic["cond_name"], cond_dic)
+
+    def get_select_stock_cache_to_sql(self, condition):
+        result = self._read_from_json("condition", condition)
+        return result if result is not None else {
+            "cond_name": condition,
+            "activate": False,
+            "cond_content": "",
+            "operator": "",
+            "cond_value": None
+        }
 
     # 把列出資料夾的程式碼寫成一個函式
     @classmethod
@@ -130,30 +174,6 @@ class CrawlerProcessor(Crawler):
         else:
             date_list = datetime.datetime.now().strftime('%Y-%m-%d')
         return [date_list]
-
-    def save_select_stock_cache_to_sql(self, combination):
-        cond_dic = {
-            "cond_name": combination[0],
-            "activate": combination[1],
-            "cond_content": combination[2],
-            "operator": combination[3],
-            "cond_value": combination[4]
-        }
-        df = pd.DataFrame(cond_dic)
-
-        table_name = "cache"
-        exist = self.table_exist(table_name)
-        if exist:
-            df.to_sql(table_name, self.conn, index=False, if_exists='replace')
-        else:
-            df.to_sql(table_name, self.conn, index=False, if_exists='append')
-
-    def get_select_stock_cache_to_sql(self, category):
-        table_name = "cache"
-        if self.table_exist(table_name):
-            df = pd.read_sql("""SELECT * FROM {} WHERE cond_name = "{}" """.format(table_name, category), self.conn)
-            return df if df.size != 0 else pd.DataFrame()
-        return pd.DataFrame()
 
 
 class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
