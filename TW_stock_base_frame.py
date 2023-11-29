@@ -57,30 +57,33 @@ class BaseFrame(Frame):
         else:
             self._clear_queue()
 
+    # 將佇列中的訊息顯示到scrolled text上
     def handle_message(self):
         _pbar_line = 0
         while self._msg_flag:
             if not msg_queue.empty():
                 msg = msg_queue.get()
+                end_position = self.scroll_txt.index(END)
+                line, column = map(int, end_position.split("."))
                 if isinstance(msg, tuple):
-                    insert_position = self.scroll_txt.index(END)
-                    line, column = map(int, insert_position.split("."))
                     if _pbar_line:
-                        del_line = line-_pbar_line
+                        del_line = line - _pbar_line
                         self.scroll_txt.delete(f"end-{del_line+1}l", f"end-{del_line}l")
-                        _pbar_line = line - 1
-                    else:
-                        _pbar_line = line
-                    self.scroll_txt.insert(END, f"{msg[0]}\n")
-                else:
-                    self.scroll_txt.insert(END, f"{msg}\n")
+                    _pbar_line = 1
+                    msg = msg[0]
+
+                _pbar_line += 1 if _pbar_line else 0
+                self.scroll_txt.insert("1.0", f"{msg}\n")
+
+                if line > 20:
+                    self.scroll_txt.delete(f"end-{line-19}l", f"end-{line-20}l")
                 msg_queue.task_done()
 
             # 繼續定期檢查
             self.update()
             time.sleep(0.1)
-            # self.after(1000, self.handle_message)
 
+    # 清空訊息佇列
     def _clear_queue(self):
         while not msg_queue.empty():
             msg_queue.get()
@@ -120,6 +123,7 @@ class BaseScrapperFrame(BaseFrame):
             values=self.crawler_processor.date_func(table=self.table_name, pattern="to")))
         self.create_crawler_widgets()
         self.create_common_widgets()
+        self.update_func()
 
     def create_crawler_widgets(self):
         # 選擇要爬取的資料型態
