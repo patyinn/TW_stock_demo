@@ -213,13 +213,13 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
                 fsa.update_per,
             ]
         )
-        # await fsa.update_season_report(stock_id)
-        try:
-            for work in _all_works:
+
+        for work in _all_works:
+            try:
                 await work(stock_id)
-        except Exception as e:
-            msg_queue.put("{}發生問題，問題原因: {}".format(stock_id, e))
-            print("{}發生問題，問題原因: {}".format(stock_id, e))
+            except Exception as e:
+                msg_queue.put("{}發生問題，問題原因: {}".format(stock_id, e))
+                print("{}發生問題，問題原因: {}".format(stock_id, e))
 
     def clear_func(self):
         super().clear_func()
