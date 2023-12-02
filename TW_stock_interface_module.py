@@ -13,7 +13,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.pylab import mpl
 
 from TW_stock_module import SystemProcessor, TWStockRetrieveModule, FinancialAnalysis, SelectStock, CrawlerProcessor
-from TW_stock_base_frame import BaseScrapperFrame, BaseTemplateFrame, msg_queue
+from TW_stock_base_frame import BaseScrapperFrame, BaseTemplateFrame, msg_queue, BaseFrame
 from utils import call_by_async
 
 
@@ -475,48 +475,49 @@ class SelectStockPage(BaseTemplateFrame):
                 self.save_excel(stock_id, folder=folder_path)
 
 
-class StockAnalysisPage(Frame):
+class StockAnalysisPage(BaseFrame):
     def __init__(self, master):
-        Frame.__init__(self, master)
+        Frame.__init__(self, master, StartPage, async_loop)
         Frame.configure(self, bg='pink')
         try:
-            conn = sqlite3.connect(db_path)
-            self.data_getter = TWStockRetrieveModule(conn)
+            self.data_getter = TWStockRetrieveModule(db_path, msg_queue)
         except Exception as e:
             print("database is not connected: {}".format(e))
             master.switch_frame(StartPage)
 
         self.prev_id = ""
 
-        self.stock_id_label = Label(self, text="分析股票代號: ", background="pink", font=("TkDefaultFont", 16))
-        self.stock_id_label.grid(row=0, column=0, columnspan=3, sticky=W)
+        stock_id_label = Label(self, text="分析股票代號: ", background="pink", font=("TkDefaultFont", 16))
+        stock_id_label.grid(row=0, column=0, columnspan=3, sticky=W)
         self.stock_id_combo = ttk.Combobox(self, postcommand="", values=["2330", "0050"])
         self.stock_id_combo.current(0)
         self.stock_id_combo.grid(row=0, column=3, columnspan=3, sticky=W)
 
-        self.back_btn = Button(self, text="Go back", command=lambda: master.switch_frame(StartPage))
-        self.back_btn.grid(row=1, column=0, sticky=W)
-        self.m_report_btn = Button(self, text="月財報", command=lambda: [self.initial_data(),
-                                                                         self.show_table(self.month_df),
-                                                                         self.create_widget(self.month_fig)])
-        self.m_report_btn.grid(row=1, column=1, sticky=W)
-        self.s_report_btn = Button(self, text="季財報", command=lambda: [self.initial_data(),
-                                                                         self.show_table(self.season_df),
-                                                                         self.create_widget(self.season_fig, x=0, y=4,
-                                                                                            xs=5)
-                                                                         ])
-        self.s_report_btn.grid(row=1, column=2, sticky=W)
-        self.cash_btn = Button(self, text="現金流", command=lambda: [self.initial_data(),
-                                                                     self.show_table(self.cash_df)
-                                                                     ])
-        self.cash_btn.grid(row=1, column=3, sticky=W)
-        self.price_btn = Button(self, text="價位分析", command=lambda: [self.initial_data(),
+        back_btn = Button(self, text="Go back", command=lambda: master.switch_frame(StartPage))
+        back_btn.grid(row=1, column=0, sticky=W)
+        m_report_btn = Button(self, text="月財報", command=lambda: [self.initial_data(),
+                                                                   self.show_table(self.month_df),
+                                                                   self.create_widget(self.month_fig)])
+        m_report_btn.grid(row=1, column=1, sticky=W)
+        s_report_btn = Button(self, text="季財報", command=lambda: [self.initial_data(),
+                                                                   self.show_table(self.season_df),
+                                                                   self.create_widget(self.season_fig, x=0, y=4, xs=5)
+                                                                   ])
+        s_report_btn.grid(row=1, column=2, sticky=W)
+        cash_btn = Button(self, text="現金流", command=lambda: [self.initial_data(),
+                                                               self.show_table(self.cash_df)
+                                                              ])
+        cash_btn.grid(row=1, column=3, sticky=W)
+        price_btn = Button(self, text="價位分析", command=lambda: [self.initial_data(),
                                                                         self.show_table(self.est_price),
                                                                         self.create_widget(self.month_fig)
                                                                         ])
-        self.price_btn.grid(row=1, column=4, sticky=W)
-        self.exit_btn = Button(self, text="Exit", command=self.quit)
-        self.exit_btn.grid(row=1, column=5, sticky=W)
+        price_btn.grid(row=1, column=4, sticky=W)
+        exit_btn = Button(self, text="Exit", command=self.quit)
+        exit_btn.grid(row=1, column=5, sticky=W)
+
+        self.data_table = ttk.Treeview(self, columns=("Tags"), height=15)
+        self.canvas = None
 
     def initial_data(self):
         id = self.stock_id_combo.get()
@@ -559,7 +560,6 @@ class StockAnalysisPage(Frame):
 
     def draw_figure(self, df, setting):
         """建立繪圖物件"""
-
         # 設定中文顯示字型
         mpl.rcParams['font.sans-serif'] = ['Microsoft JhengHei']  # 中文顯示
         mpl.rcParams['axes.unicode_minus'] = False  # 負號顯示
@@ -646,7 +646,6 @@ class StockAnalysisPage(Frame):
         style = ttk.Style()
         style.map('Treeview', foreground=fixed_map('foreground'), background=fixed_map('background'))
 
-        self.data_table = ttk.Treeview(self, columns=("Tags"), height=15)
         self.data_table.grid(row=2, column=0, columnspan=5, sticky=W + E)
 
         vsb = ttk.Scrollbar(self, orient="vertical", command=self.data_table.yview)
