@@ -327,7 +327,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             add_revenue = add_row_num + 24
             target_cols = ['當月營收', '上月比較增減(%)', '去年同月增減(%)']
             mapper, dfs = self.get_bundle_data(target_cols, add_revenue, stock_id)
-            mapper, price_dfs = self.get_bundle_data(['收盤價'], add_row_num*40)
+            mapper, price_dfs = self.get_bundle_data(['收盤價'], add_row_num*40, stock_id)
             df = TWStockRetrieveModule2.parse_month_df(dfs, price_dfs[0])
             df = df.loc[stock_id]
 
@@ -337,9 +337,9 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                 (5, 4, "月營收年增率"),
                 (5, 19, "3個月移動平均年增率"),
                 (5, 20, "12個月移動平均年增率"),
-                (5, 6, "最低股價"),
+                (5, 8, "最低股價"),
                 (5, 7, "平均股價"),
-                (5, 8, "最高股價"),
+                (5, 6, "最高股價"),
             ]
 
             add_row_num -= 1
@@ -347,15 +347,17 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                 self.ws0.insert_rows(5, amount=1)
 
                 '''  新增月份  '''
-                update_month = latest_date - relativedelta(months=add_row)
-
-                self.write_to_excel(update_month, sheet=self.ws0, rows=5, cols=1, string="月份標籤", date=f"{update_month}")
+                update_month = (latest_date - relativedelta(months=add_row))
+                self.write_to_excel(
+                    update_month, sheet=self.ws0, rows=5, cols=1, string="月份標籤", date=f"{update_month}"
+                )
                 self.ws0.cell(row=5, column=1).number_format = "mmm-yy"
 
                 '''        更新營收        '''
                 for pos in target_pos:
+                    target_month = update_month.strftime("%b-%y")
                     self.write_to_excel(
-                        df.loc[update_month, pos[2]],
+                        df.loc[target_month, pos[2]],
                         sheet=self.ws0,
                         rows=pos[0],
                         cols=pos[1],
@@ -364,7 +366,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                     )
                     if pos[2] in ['月營收月增率', '月營收年增率']:
                         self.warning_func(
-                            df.loc[update_month, pos[2]] >= 0,
+                            df.loc[target_month, pos[2]] >= 0,
                             sheet=self.ws0,
                             rows=pos[0],
                             cols=pos[1],
@@ -469,9 +471,8 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                 '權益總額',
             ]
             mapper, dfs = self.get_bundle_data(target_cols, get_data_num, stock_id, assign_table={"折舊費用": "cash_flows"})
-            mapper, price_dfs = self.get_data_assign_table("收盤價", add_column_num*65)
-
-            df = TWStockRetrieveModule2.parse_month_df(dfs, price_dfs[0])
+            mapper, price_dfs = self.get_bundle_data(["收盤價"], add_column_num*65, stock_id)
+            df = TWStockRetrieveModule2.parse_season_df(dfs, price_dfs[0])
             df = df.loc[stock_id]
             df = df.rename(columns={
                 cols: cols[1]
@@ -498,7 +499,6 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                 "無形資產占比": [df["無形資產占比"] > 10, df["無形資產占比"] > 30],
                 "折舊負擔比率": [df["折舊負擔比率"] > df["營業利益率"]],
             }
-
             write_df_to_excel = [
                 (3, 5, "當季營收",),
                 (4, 5, "季營收年增率",),
@@ -518,7 +518,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                 (18, 5, "存貨占營收比",),
                 (19, 5, "營收市值比",),
 
-                (21, 5, "股本",),
+                (21, 5, "股本合計",),
                 (22, 5, "股本季增率",),
                 (23, 5, "供應商應付帳款總資產占比",),
                 (24, 5, "負債總資產占比",),
@@ -536,31 +536,30 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             ]
 
             add_column_num *= -1
+            print(df)
             for add_row in range(add_column_num, 0, 1):
                 self.ws1.insert_cols(5, amount=1)
-                update_season_date = df["營業收入合計"].index[add_row]
-                update_season_str = update_season_date.strftime('%Y-%m-%d')
+                update_season = df["當季營收"].index[add_row]
 
                 '''  新增季度標籤  '''
-                update_season = self.season_determination(update_season_date)
                 self.write_to_excel(update_season, sheet=self.ws1, rows=1, cols=5, string="季度標籤",
                                     date=f"{update_season}")
                 self.ws1.cell(row=1, column=5).fill = PatternFill(fill_type="solid", fgColor="DDDDDD")
 
                 for data in write_df_to_excel:
                     self.write_to_excel(
-                        df.loc[update_season_date, data[2]],
+                        df.loc[update_season, data[2]],
                         sheet=self.ws1,
                         round_num=2,
                         rows=data[0],
                         cols=data[1],
                         string=data[2],
-                        date=f"{update_season_str}"
+                        date=f"{update_season}"
                     )
                     if warning_on_excel.get(data[2]):
                         warning_cond = warning_on_excel[data[2]]
                         for i, cond in enumerate(warning_cond):
-                            if cond[update_season_date] and i == 0:
+                            if cond[update_season] and i == 0:
                                 self.warning_func(
                                     True,
                                     sheet=self.ws1,
@@ -569,7 +568,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                                     threat=True
                                 )
                                 break
-                            elif cond[update_season_str] and i == 1:
+                            elif cond[update_season] and i == 1:
                                 self.warning_func(
                                     True,
                                     sheet=self.ws1,
@@ -633,10 +632,9 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             for add_row in range(add_column_num, 0, 1):
                 self.ws2.insert_cols(4, amount=1)
                 update_year = df.index[add_row]
-                update_year_str = update_year.strftime('%Y')
 
                 '''  新增年度標籤  '''
-                self.write_to_excel(update_year_str, sheet=self.ws2, rows=1, cols=4, string="現金流量標籤", date=update_year_str)
+                self.write_to_excel(update_year, sheet=self.ws2, rows=1, cols=4, string="現金流量標籤", date=update_year)
                 self.ws2.cell(row=1, column=4).fill = PatternFill(fill_type="solid", fgColor="DDDDDD")
 
                 '''  新增營業活動現金、理財活動現金、自由現金流量、籌資活動現金 新增期初現金及約當現金餘額、期末現金及約當現金餘額'''
@@ -649,21 +647,16 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
                         rows=pos[0],
                         cols=pos[1],
                         string=pos[2],
-                        date=update_year_str
+                        date=update_year
                     )
-
-            try:
-                '''   判斷條件   '''
-                for c in range(4, 9):
-                    # 營業活動現金
-                    condition_ocf = int(self.ws2.cell(row=3, column=c).value) < 0
-                    self.warning_func(condition_ocf, sheet=self.ws2, rows=3, cols=c, threat='True')
-                    # 自由現金
-                    condition_fcf = int(self.ws2.cell(row=5, column=c).value) < 0
-                    self.warning_func(condition_fcf, sheet=self.ws2, rows=5, cols=c, threat='True')
-            except:
-                print(f"{stock_id} 警告上色錯誤")
-                self.msg_queue.put(f"{stock_id} 警告上色錯誤")
+                    if pos[2] in ['營業活動現金', '自由現金流量']:
+                        self.warning_func(
+                            df.loc[update_year, pos[2]] < 0,
+                            sheet=self.ws2,
+                            rows=pos[0],
+                            cols=pos[1],
+                            threat=True
+                        )
 
             self.wb.save(path or self.file_path)
             print("完成更新 {} 的 現金流量表".format(stock_id))
@@ -686,8 +679,8 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             print("Increase PER this season and update PER this year.")
             self.msg_queue.put("Increase PER this season and update PER this year.")
 
-        # 決定要更新多少當年度的PER，抓取excel同年度資料，寫進Update_row
-        update_row_num = 0 if diff_year != 0 else diff_season
+        # 更新當下是第幾季度，從Q1到當下都是更新目標
+        update_row_num = int(table_month[-1])
 
         # 根據需要跟新以及新增的數量，去從sqlite3抓取相對應的數據量
         total_num = update_row_num + add_row_num
@@ -697,7 +690,6 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
 
         price_num = total_num * 100
         price_df = self.get_data_assign_table("收盤價", price_num)
-
         equity = equity[stock_id].dropna()
         profit_after_tax = profit_after_tax[stock_id].dropna()
         price_df = price_df[stock_id].dropna()
@@ -755,7 +747,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
 
         mapper, dfs = self.get_bundle_data(total_cols, 1, stock_id)
         df = pd.concat(dfs, axis=1)
-
+        df = df.loc[stock_id]
         date_str = df.index[0].strftime("%Y/%m/%d")
 
         self.write_to_excel(
@@ -1461,21 +1453,24 @@ class TWStockRetrieveModule2(RetrieveDataModule):
         df = pd.concat(dfs, axis=1)
         df['當月營收'] = df['當月營收'].multiply(0.00001)  # 單位: 億
 
-        price_df = price_df.groupby(price_df.index).aggregate(['min', 'mean', 'max'])
+        price_df = price_df.groupby(['stock_id', pd.Grouper(level='date', freq='M')]).aggregate(['min', 'mean', 'max'])
         price_df.columns = price_df.columns.get_level_values(1)
         price_df = price_df.rename(columns={
             "min": "最低股價",
             "mean": "平均股價",
             "max": "最高股價"
         })
+        price_df.index = pd.MultiIndex.from_tuples(price_df.index, names=['stock_id', 'date'])
+        price_df.index = price_df.index.map(lambda s: (s[0], s[1].strftime("%b-%y")))
 
         # 計算3個月以及12個月的移動平均數
         df["3個月移動平均年增率"] = df["去年同月增減(%)"].rolling(3).mean()
         df["12個月移動平均年增率"] = df["去年同月增減(%)"].rolling(12).mean()
 
         df = df.reset_index().set_index(["stock_id", "date"])
-        df = pd.concat([df, price_df], join="inner", axis=1).sort_index(ascending=False).round(2)
         df.index = df.index.map(lambda s: (s[0], s[1].strftime("%b-%y")))
+
+        df = pd.concat([df, price_df], join="inner", axis=1).sort_index(ascending=False).round(2)
         return df.rename(columns={
             "當月營收": "月營收(億)",
             '上月比較增減(%)': "月營收月增率",
@@ -1487,23 +1482,27 @@ class TWStockRetrieveModule2(RetrieveDataModule):
     def retrieve_month_data(self, stock_id):
         return self.month_df.loc[stock_id]
 
-    def parse_season_df(self, dfs, price_df):
+    @classmethod
+    def parse_season_df(cls, dfs, price_df):
         df = pd.concat(dfs, axis=1)
+
         df = df.multiply(0.00001)  # 單位: 億
         df["權益總計"].fillna(df["權益總額"], inplace=True)
         df.drop("權益總額", axis=1, inplace=True)
 
         season_report_price = price_df[price_df.index.isin(df.index)]["收盤價"]
         '''        拆解數據處理        '''
-        df["遞減折舊費用"] = df.groupby("stock_id").apply(lambda s: self.data_process_multi_index(s['折舊費用'], cum=False))
+        df["遞減折舊費用"] = df.groupby("stock_id")["折舊費用"].transform(lambda s: cls.data_process_multi_index(s, cum=False))
         '''        累積數據處理        '''
-        df["累積股東權益報酬率(季)"] = df.groupby("stock_id").apply(lambda s: self.data_process_multi_index((s["本期淨利（淨損）"] / s["權益總計"] * 100), cum=True))
-        df["累積季營收"] = df.groupby("stock_id").apply(lambda s: self.data_process_multi_index(s['營業收入合計'], cum=True))
-        df["累積稅後淨利"] = df.groupby("stock_id").apply(lambda s: self.data_process_multi_index(s["本期淨利（淨損）"], cum=True))
+        df["累積股東權益報酬率(季)"] = df["本期淨利（淨損）"] / df["權益總計"] * 100
+        df["累積股東權益報酬率(季)"] = df.groupby("stock_id")["累積股東權益報酬率(季)"].transform(lambda s: cls.data_process_multi_index(s, cum=True))
+        df["累積季營收"] = df.groupby("stock_id")['營業收入合計'].transform(lambda s: cls.data_process_multi_index(s, cum=True))
+        df["累積稅後淨利"] = df.groupby("stock_id")["本期淨利（淨損）"].transform(lambda s: cls.data_process_multi_index(s, cum=True))
         df["累積稅後淨利率"] = df["累積稅後淨利"] / df["累積季營收"] * 100
         df["累積營收淨值比"] = (df["本期淨利（淨損）"] / df["累積季營收"]) * 100
         df["累積股東權益資產轉換率"] = (df["權益總計"] / df["資產總計"]) * 100
-        df["累積資產變化"] = df.groupby("stock_id").apply(lambda s: self.data_process_multi_index((s["資產總計"] + s["資產總計"].shift(1)) / 2, cum=True))
+        df["累積資產變化"] = (df["資產總計"] + df["資產總計"].shift(1)) / 2
+        df["累積資產變化"] = df.groupby("stock_id")["累積資產變化"].transform(lambda s: cls.data_process_multi_index(s, cum=True))
         df["總資產週轉率(次/年)"] = df["累積季營收"] / df["累積資產變化"] * 4
 
         '''        處理需要放到excel的資料        '''
@@ -1527,7 +1526,7 @@ class TWStockRetrieveModule2(RetrieveDataModule):
         df["供應商應付帳款總資產占比"] = 100 * (df["應付帳款"] / df["資產總計"])
         df["負債總資產占比"] = 100 * (df["負債總計"] / df["資產總計"])
         df["無形資產占比"] = 100 * (df["無形資產"] / df["資產總計"])
-        df["股東權益報酬率(年預估)"] = df.loc[:, ["累積股東權益報酬率(季)"]].apply(self._estimate_roe, axis=1)
+        df["股東權益報酬率(年預估)"] = df.loc[:, ["累積股東權益報酬率(季)"]].apply(cls._estimate_roe, axis=1)
         df["權益係數"] = 100 / df["累積股東權益資產轉換率"]
 
         df = df.rename(columns={"營業收入合計": "當季營收"})

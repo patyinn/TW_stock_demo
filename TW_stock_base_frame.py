@@ -81,7 +81,7 @@ class BaseFrame(Frame):
 
             # 繼續定期檢查
             self.update()
-            time.sleep(0.1)
+            time.sleep(0.01)
 
     # 清空訊息佇列
     def _clear_queue(self):
