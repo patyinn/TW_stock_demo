@@ -477,8 +477,7 @@ class SelectStockPage(BaseTemplateFrame):
 
 class StockAnalysisPage(BaseFrame):
     def __init__(self, master):
-        Frame.__init__(self, master, StartPage, async_loop)
-        Frame.configure(self, bg='pink')
+        super().__init__(master, StartPage, async_loop)
         try:
             self.data_getter = TWStockRetrieveModule(db_path, msg_queue)
         except Exception as e:
@@ -532,6 +531,7 @@ class StockAnalysisPage(BaseFrame):
             }
             self.month_df = self.data_getter.retrieve_month_data(id)
             fig, setting = self.data_getter.module_data_to_draw(id, month_setting)
+            print(fig, setting)
             self.month_fig = self.draw_figure(fig, setting)
 
             # 季財報

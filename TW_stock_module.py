@@ -1018,7 +1018,7 @@ class SelectStock(RetrieveDataModule):
             yield s_date, e_date
 
 
-class TWStockRetrieveModule(RetrieveDataModule):
+class TWStockRetrieveModule1(RetrieveDataModule):
     def __init__(self, db_path, msg_queue):
         conn = sqlite3.connect(db_path)
         super().__init__(conn, msg_queue)
@@ -1387,27 +1387,32 @@ class TWStockRetrieveModule(RetrieveDataModule):
         return new_data
 
 
-class TWStockRetrieveModule2(RetrieveDataModule):
-    def __init__(self, db_path, msg_queue):
-        # conn = sqlite3.connect(db_path)
-        # super().__init__(conn, msg_queue)
+class TWStockRetrieveModule(RetrieveDataModule):
+    cache_price = {}
+    cache_month = {}
+    cache_season = {}
+    cache_cash = {}
 
+    def __init__(self, db_path, msg_queue):
+        self.db_path = db_path
+        self.msg_queue = msg_queue
         self.price = pd.DataFrame()
         self.month_df = pd.DataFrame()
         self.season_df = pd.DataFrame()
         self.cash_df = pd.DataFrame()
         self.mapper = {}
-        self.initialize_data(db_path, msg_queue)
 
-    def initialize_data(self, db_path, msg_queue):
-        conn = sqlite3.connect(db_path)
-        retriever = RetrieveDataModule(conn, msg_queue)
+        print(self.month_df, self.mapper)
 
-        mapper, dfs = retriever.get_bundle_data(['收盤價'], 800)
+    def retrieve_data_from_db(self, stock_id):
+        conn = sqlite3.connect(self.db_path)
+        retriever = RetrieveDataModule(conn, self.msg_queue)
+
+        mapper, dfs = retriever.get_bundle_data(['收盤價'], 800, stock_id)
         self.price = dfs[0]
 
-        mapper, dfs = retriever.get_bundle_data(['當月營收', '上月比較增減(%)', '去年同月增減(%)'], 36)
-        self.month_df = self.parse_month_df(dfs, self.price)
+        mapper, dfs = retriever.get_bundle_data(['當月營收', '上月比較增減(%)', '去年同月增減(%)'], 36, stock_id)
+        self.month_df = pd.concat([self.month_df, self.parse_month_df(dfs, self.price)])
 
         target_cols = [
             '營業收入合計',
@@ -1427,8 +1432,8 @@ class TWStockRetrieveModule2(RetrieveDataModule):
             '權益總計',
             '權益總額',
         ]
-        mapper, dfs = retriever.get_bundle_data(target_cols, 16, assign_table={"折舊費用": "cash_flows"})
-        self.season_df = self.parse_season_df(dfs, self.price)
+        mapper, dfs = retriever.get_bundle_data(target_cols, 16, stock_id, assign_table={"折舊費用": "cash_flows"})
+        self.season_df = pd.concat([self.season_df, self.parse_season_df(dfs, self.price)])
 
         target_cols = [
             "投資活動之淨現金流入（流出）",
@@ -1437,15 +1442,37 @@ class TWStockRetrieveModule2(RetrieveDataModule):
             "期初現金及約當現金餘額",
             "期末現金及約當現金餘額"
         ]
-        mapper, dfs = retriever.get_bundle_data(target_cols, 36)
-        self.cash_df = self.parse_cash_df(dfs)
+        mapper, dfs = retriever.get_bundle_data(target_cols, 36, stock_id)
+        self.cash_df = pd.concat([self.cash_df, self.parse_cash_df(dfs)])
 
+        # 這裡未改，會有問題
         self.mapper = {
-            "股價": self.price,
-            "月營收": self.month_df,
-            "月營收月增率": self.month_df,
-            "月營收年增率": self.month_df,
+            "股價": self.price.loc[stock_id, "收盤價"],
+            "月營收": self.month_df.loc[stock_id, "月營收(億)"],
+            "月營收月增率": self.month_df.loc[stock_id, "月營收月增率"],
+            "月營收年增率": self.month_df.loc[stock_id, "月營收年增率"],
         }
+
+    def retrieve_month_data(self, stock_id):
+        if stock_id in self.month_df.index.get_level_values("stock_id"):
+            return self.month_df.loc[stock_id]
+        else:
+            self.retrieve_data_from_db(stock_id)
+            return self.month_df.loc[stock_id]
+
+    def retrieve_season_data(self, stock_id):
+        if stock_id in self.season_df.index.get_level_values("stock_id"):
+            return self.season_df.loc[stock_id]
+        else:
+            self.retrieve_data_from_db(stock_id)
+            return self.season_df.loc[stock_id]
+
+    def retrieve_cash_data(self, stock_id):
+        if stock_id in self.cash_df.index.get_level_values("stock_id"):
+            return self.cash_df.loc[stock_id]
+        else:
+            self.retrieve_data_from_db(stock_id)
+            return self.cash_df.loc[stock_id]
 
     @classmethod
     def parse_month_df(cls, dfs, price_df):
@@ -1478,9 +1505,6 @@ class TWStockRetrieveModule2(RetrieveDataModule):
         })[
             ["月營收(億)", "月營收月增率", "月營收年增率", "3個月移動平均年增率", "12個月移動平均年增率", "最低股價", "平均股價", "最高股價"]
         ]
-
-    def retrieve_month_data(self, stock_id):
-        return self.month_df.loc[stock_id]
 
     @classmethod
     def parse_season_df(cls, dfs, price_df):
@@ -1573,9 +1597,6 @@ class TWStockRetrieveModule2(RetrieveDataModule):
         df.index = df.index.map(lambda s: (s[0], s[1].to_period("Q").strftime('%yQ%q')))
         return df.rename(columns=rename_cols)[remain_cols]
 
-    def retrieve_season_data(self, stock_id):
-        return self.season_df.loc[stock_id]
-
     @classmethod
     def parse_cash_df(cls, dfs):
         df = pd.concat(dfs, axis=1).multiply(0.00001)  # 單位:億
@@ -1589,9 +1610,6 @@ class TWStockRetrieveModule2(RetrieveDataModule):
         })[
             ["理財活動現金", "營業活動現金", "籌資活動現金", "自由現金流量", "期初現金及約當現金餘額", "期末現金及約當現金餘額"]
         ]
-
-    def retrieve_cash_data(self, stock_id):
-        return self.cash_df.loc[stock_id]
 
     def price_estimation(self, stock_id):
         revenue_month = self.get_data('當月營收', 36)[stock_id].rename("月營收(百萬)")
@@ -1652,7 +1670,7 @@ class TWStockRetrieveModule2(RetrieveDataModule):
         df_list = []
         for m in setting.get("main"):
             df = self.mapper.get(m)
-            df = df[stock_id].rename(f"m*{m}")
+            df = df.loc[stock_id].rename(f"m*{m}")
             df.index = pd.to_datetime(df.index.strftime("%Y-%m"), format="%Y-%m")
             if m == "股價":
                 df = df.groupby(df.index).mean().sort_values()
@@ -1668,15 +1686,15 @@ class TWStockRetrieveModule2(RetrieveDataModule):
                 s1 = s
                 month = None
             df = self.mapper.get(s1)
-            df = df[stock_id].rename(f"s*{s}")
-            df.index = pd.to_datetime(df.index.strftime("%Y-%m"), format="%Y-%m")
+            df = df.loc[stock_id].rename(f"s*{s}")
+            print(df)
             if month:
                 df = df.rolling(month).mean().reindex(index=df.index).rename(f"s*{s}")
             df = round(df, 2)
             df_list.append(df)
 
         final = pd.concat(df_list, join="inner", axis=1).sort_index(ascending=False)
-        final.index = final.index.strftime('%b-%y').rename("日期")
+        final.index = final.index.rename("日期")
 
         return final, setting
 
