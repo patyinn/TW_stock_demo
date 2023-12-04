@@ -177,592 +177,6 @@ class CrawlerProcessor(Crawler):
         return [date_list]
 
 
-class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
-    def __init__(self, db_path, msg_queue, file_path):
-        self.file_path = file_path
-        self.wb = load_workbook(self.file_path)
-        self.ws0 = self.wb["月財報"]
-        self.ws1 = self.wb["季財報"]
-        self.ws2 = self.wb["現金流量"]
-        self.ws3 = self.wb["進出場參考"]
-        self.ws4 = self.wb["合理價推估"]
-        self.msg_queue = msg_queue
-        conn = sqlite3.connect(db_path)
-        super().__init__(conn, msg_queue)
-
-    @staticmethod
-    def season_transform(date, spec=None):
-        if date is not pd.Series(dtype='object'):
-            date = pd.Series(date)
-        df = pd.DataFrame()
-        df['Quarter'] = pd.to_datetime(date)
-        df['Quarter'] = df['Quarter'].dt.to_period('Q').dt.strftime("%YQ%q")
-        if spec:
-            return df['Quarter']
-        else:
-            return df['Quarter'].iloc[-1]
-
-    @staticmethod
-    def season_determination(date):
-        year = date.year
-        if date.month <= 3:
-            season = 4
-            year = year - 1
-        elif date.month <= 5:
-            season = 1
-        elif date.month <= 8:
-            season = 2
-        elif date.month <= 11:
-            season = 3
-        elif date.month <= 12:
-            season = 4
-        else:
-            print("Wrong month to determine")
-        return f"{year}Q{season}"
-
-    @staticmethod
-    def diff_months(str1, str2):
-        year1 = datetime.datetime.strptime(str1[0:10], "%Y-%m").year
-        year2 = datetime.datetime.strptime(str2[0:10], "%Y-%m").year
-        month1 = datetime.datetime.strptime(str1[0:10], "%Y-%m").month
-        month2 = datetime.datetime.strptime(str2[0:10], "%Y-%m").month
-        num = (year1 - year2) * 12 + (month1 - month2)
-        return num
-
-    @classmethod
-    def delta_seasons(cls, date, delta):
-        str1 = cls.season_determination(date)
-        year = int(str1[0:4])
-        s = int(str1[-1])
-
-        season = s - delta
-        while season <= 0:
-            season += 4
-            year -= 1
-        while season >= 5:
-            season -= 4
-            year += 1
-
-        if season == 4:
-            month = 3
-            day = 31
-            year += 1
-        elif season == 3:
-            month = 11
-            day = 14
-        elif season == 2:
-            month = 8
-            day = 14
-        elif season == 1:
-            month = 5
-            day = 15
-        else:
-            print("Wrong season")
-        return datetime.datetime(year, month, day)
-
-    @staticmethod
-    def warning_func(use_cond, sheet=None, rows=None, cols=None, threat=None):
-        if use_cond:
-            if threat:
-                sheet.cell(row=rows, column=cols).font = Font(color='FF0000', bold=True)  # 紅色
-                sheet.cell(row=rows, column=cols).fill = PatternFill(fill_type="solid", fgColor="FFFFBB")
-                side_style = Side(style="thin", color="FF0000")
-                sheet.cell(row=rows, column=cols).border = Border(left=side_style, right=side_style, top=side_style,
-                                                                  bottom=side_style)
-                sheet.cell(row=rows, column=1).fill = PatternFill(fill_type="solid", fgColor="AA0000")  # 深紅色
-            else:
-                sheet.cell(row=rows, column=cols).font = Font(color='FF0000', bold=False)  # 紅色
-                sheet.cell(row=rows, column=cols).fill = PatternFill(fill_type="solid", fgColor="FFFFBB")
-                sheet.cell(row=rows, column=1).fill = PatternFill(fill_type="solid", fgColor="FFAA33")  # 橘色
-        else:
-            sheet.cell(row=rows, column=cols).font = Font(color='000000')  # 黑色
-            sheet.cell(row=rows, column=1).fill = PatternFill(fill_type="solid", fgColor="FFFFFF")  # 白色
-
-    @staticmethod
-    def _estimate_roe(c_roe):
-        if c_roe.name.month == 5:
-            return c_roe * 4
-        elif c_roe.name.month == 8:
-            return c_roe * 2
-        elif c_roe.name.month == 11:
-            return c_roe * 4 / 3
-        return c_roe
-
-    def write_to_excel(self, data, round_num=None, sheet=None, rows=None, cols=None, string="", date=None):
-        if round_num:
-            data = round(data, round_num)
-        sheet.cell(row=rows, column=cols).value = data
-        sheet.cell(row=rows, column=cols).alignment = Alignment(horizontal="center", vertical="center",
-                                                                wrap_text=True)
-        if string:
-            msg = f"新增{date}的{string}: {data}"
-            self.msg_queue.put(msg)
-            print(msg)
-
-    @staticmethod
-    def get_cash_flow(raw_data):
-        # 抓每年的Q4與最後一筆
-        q4_data = raw_data[raw_data.index.month == 3]
-        df_data = pd.concat([q4_data, raw_data.iloc[-1:]]).drop_duplicates()
-        df_data.index = [datetime.datetime(idx.year - 1, idx.month, 1) if idx.month == 3 else idx for idx in df_data.index]
-        return df_data
-
-    async def update_monthly_report(self, stock_id, path=None):
-        '''    從資料庫獲取月營收最新日期    '''
-        revenue_month = self.get_data('當月營收', 2)
-
-        '''    時間判斷    '''
-        # 改成用資料庫的最新時間尤佳
-        latest_date = revenue_month[stock_id].dropna().index[-1]
-        latest_date_str = datetime.datetime.strftime(latest_date, '%Y-%m')
-        table_month = datetime.datetime.strftime(self.ws0["A5"].value, '%Y-%m')
-
-        if table_month == latest_date_str:
-            self.msg_queue.put("No month data need to update.")
-            print("No month data need to update.")
-        else:
-            add_row_num = self.diff_months(latest_date_str, table_month)
-
-            '''        根據相差月份取相對應數量的資料        '''
-            add_revenue = add_row_num + 24
-            target_cols = ['當月營收', '上月比較增減(%)', '去年同月增減(%)']
-            mapper, dfs = self.get_bundle_data(target_cols, add_revenue, stock_id)
-            mapper, price_dfs = self.get_bundle_data(['收盤價'], add_row_num*40, stock_id)
-            df = TWStockRetrieveModule.parse_month_df(dfs, price_dfs[0])
-            df = df.loc[stock_id]
-
-            target_pos = [
-                (5, 2, "月營收(億)"),
-                (5, 3, "月營收月增率"),
-                (5, 4, "月營收年增率"),
-                (5, 19, "3個月移動平均年增率"),
-                (5, 20, "12個月移動平均年增率"),
-                (5, 8, "最低股價"),
-                (5, 7, "平均股價"),
-                (5, 6, "最高股價"),
-            ]
-
-            add_row_num -= 1
-            for add_row in range(add_row_num, -1, -1):
-                self.ws0.insert_rows(5, amount=1)
-
-                '''  新增月份  '''
-                update_month = (latest_date - relativedelta(months=add_row))
-                self.write_to_excel(
-                    update_month, sheet=self.ws0, rows=5, cols=1, string="月份標籤", date=f"{update_month}"
-                )
-                self.ws0.cell(row=5, column=1).number_format = "mmm-yy"
-
-                '''        更新營收        '''
-                for pos in target_pos:
-                    target_month = update_month.strftime("%b-%y")
-                    self.write_to_excel(
-                        df.loc[target_month, pos[2]],
-                        sheet=self.ws0,
-                        rows=pos[0],
-                        cols=pos[1],
-                        string=pos[2],
-                        date=f"{update_month}"
-                    )
-                    if pos[2] in ['月營收月增率', '月營收年增率']:
-                        self.warning_func(
-                            df.loc[target_month, pos[2]] >= 0,
-                            sheet=self.ws0,
-                            rows=pos[0],
-                            cols=pos[1],
-                            threat=False
-                        )
-
-            self.wb.save(path or self.file_path)
-            print("完成更新 {} 的 月報".format(stock_id))
-            self.msg_queue.put("完成更新 {} 的 月報".format(stock_id))
-
-    async def update_directors_and_supervisors(self, stock_id, path=None):
-        url = "https://goodinfo.tw/StockInfo/StockDirectorSharehold.asp?STOCK_ID={}".format(str(stock_id))
-        r = await self.requests_get(url)
-
-        dfs = pd.read_html(StringIO(r.text))
-        df = pd.concat([df for df in dfs if df.shape[1] > 15 and df.shape[0] > 30])
-        idx = pd.IndexSlice
-        df = df.loc[idx[:], idx[["月別", "全體董監持股"], :]]
-        df.columns = df.columns.get_level_values(1)
-        df = df.set_index(["月別"])
-        df.columns = df.columns.str.replace(' ', '')
-
-        df["持股(%)"] = pd.to_numeric(df["持股(%)"], errors="coerce")
-        df = df[~ df["持股(%)"].isnull()].dropna()["持股(%)"]
-
-        df = df.rename(index=lambda s: s.replace("/", "-"))
-        data, index = [], []
-        for cells in list(self.ws0.columns):
-            data.append(cells[9].value)
-            index.append(cells[0].value)
-        data = data[4:]
-        index = index[4:]
-
-        data_now = pd.DataFrame({'date': index, 'Data': data})
-        data_now = data_now[data_now['date'].notnull()].rename(index=lambda s: s + 5)
-
-        # 確認爬蟲到的最新資料是否與excel的資料時間點相同，沒有就刪除excel資料點
-        while datetime.datetime.strftime(data_now['date'].iloc[0], "%Y-%m") != df.index[0]:
-            data_now = data_now.drop(data_now.index[0])
-        update_data = data_now[data_now['Data'].isnull()]
-
-        pd.options.mode.chained_assignment = None
-
-        for n in range(len(update_data)):
-            date = update_data['date'].iloc[n]
-            date_str = datetime.datetime.strftime(date, "%Y-%m")
-            try:
-                update_data['Data'].iloc[n] = df.loc[date_str]
-                r = update_data.index[n]
-                if self.ws0.cell(row=r, column=1).value == date:
-                    self.write_to_excel(
-                        update_data['Data'].iloc[n],
-                        sheet=self.ws0,
-                        rows=r,
-                        cols=10,
-                        string="股東占比",
-                        date=date_str
-                    )
-            except Exception as e:
-                print(f"Doesn't get {date_str} Data")
-                self.msg_queue.put(f"Doesn't get {date_str} Data")
-
-        self.wb.save(path or self.file_path)
-        print("完成更新 {} 的 股東占比".format(stock_id))
-        self.msg_queue.put("完成更新 {} 的 股東占比".format(stock_id))
-
-    async def update_season_report(self, stock_id, path=None):
-        '''    從資料庫獲取季報最新日期    '''
-        revenue_season = self.get_data_assign_table('營業收入合計', 5)
-        revenue_season = revenue_season[stock_id]
-
-        '''    時間判斷    '''
-        # 改成用資料庫的最新時間尤佳
-        latest_date = revenue_season.dropna().index[-1]
-        latest_date_str = self.season_determination(latest_date)
-        table_month = self.ws1["E1"].value
-        add_column_num = 4 * (int(latest_date_str[0:4]) - int(table_month[0:4])) + (
-                int(latest_date_str[-1]) - int(table_month[-1]))
-
-        if add_column_num <= 0:
-            print("No data need to update.")
-            self.msg_queue.put("No data need to update.")
-        else:
-            '''        根據相差月份取相對應數量的資料        '''
-            get_data_num = add_column_num + 6
-            target_cols = [
-                '營業收入合計',
-                '營業利益（損失）',
-                '營業毛利（毛損）',
-                "股本合計",
-                "繼續營業單位稅前淨利（淨損）",
-                "本期淨利（淨損）",
-                "營業成本合計",
-                "應收帳款淨額",
-                "存貨",
-                "資產總計",
-                "負債總計",
-                "應付帳款",
-                "無形資產",
-                "折舊費用",
-                '權益總計',
-                '權益總額',
-            ]
-            mapper, dfs = self.get_bundle_data(target_cols, get_data_num, stock_id, assign_table={"折舊費用": "cash_flows"})
-            mapper, price_dfs = self.get_bundle_data(["收盤價"], add_column_num*65, stock_id)
-            df = TWStockRetrieveModule.parse_season_df(dfs, price_dfs[0])
-            df = df.loc[stock_id]
-            df = df.rename(columns={
-                cols: cols[1]
-                for cols in df.columns
-            })
-
-            condition_df = pd.DataFrame()
-            condition_df["季營收年增率"] = df["季營收年增率"] <= 0
-            condition_df["營業利益成長率t"] = df["營業利益成長率"] < -30
-            condition_df["營業利益成長率"] = df["營業利益成長率"].between(-30, -20)
-            condition_df["營收市值比"] = df["營收市值比"] < 20
-            condition_df["每股稅後盈餘年成長率"] = df["每股稅後盈餘年成長率"] < 0
-            condition_df["負債總資產占比"] = df["負債總資產占比"] > 40
-            condition_df["無形資產占比"] = df["無形資產占比"] > 10
-            condition_df["無形資產占比t"] = df["無形資產占比"] > 30
-            condition_df["折舊負擔比率"] = df["折舊負擔比率"] > df["營業利益率"]
-
-            warning_on_excel = {
-                "季營收年增率": [df["季營收年增率"] <= 0],
-                "營業利益成長率": [df["營業利益成長率"] < -30, df["營業利益成長率"].between(-30, -20)],
-                "營收市值比": [df["營收市值比"] < 20],
-                "每股稅後盈餘年成長率": [df["每股稅後盈餘年成長率"] < 0],
-                "負債總資產占比": [df["負債總資產占比"] > 40],
-                "無形資產占比": [df["無形資產占比"] > 10, df["無形資產占比"] > 30],
-                "折舊負擔比率": [df["折舊負擔比率"] > df["營業利益率"]],
-            }
-            write_df_to_excel = [
-                (3, 5, "當季營收",),
-                (4, 5, "季營收年增率",),
-                (5, 5, "市值",),
-                (6, 5, "營業毛利率",),
-                (7, 5, "營業利益率",),
-                (8, 5, "營業利益成長率",),
-                (9, 5, "稅前淨利率",),
-                (10, 5, "本業收入比率",),
-                (11, 5, "稅後淨利率",),
-                (12, 5, "稅後淨利年增率",),
-                (13, 5, "每股稅後盈餘",),
-                (14, 5, "每股稅後盈餘年成長率",),
-
-                (16, 5, "應收帳款週轉率",),
-                (17, 5, "存貨周轉率",),
-                (18, 5, "存貨占營收比",),
-                (19, 5, "營收市值比",),
-
-                (21, 5, "股本合計",),
-                (22, 5, "股本季增率",),
-                (23, 5, "供應商應付帳款總資產占比",),
-                (24, 5, "負債總資產占比",),
-                (25, 5, "無形資產占比",),
-
-                (27, 5, "遞減折舊費用",),
-                (28, 5, "折舊負擔比率",),
-
-                (30, 5, "累積股東權益報酬率(季)",),
-                (31, 5, "股東權益報酬率(年預估)",),
-                (32, 5, "累積稅後淨利率",),
-                (33, 5, "總資產週轉率(次/年)",),
-                (34, 5, "權益係數",),
-                (35, 5, "累積股東權益資產轉換率",),
-            ]
-
-            add_column_num *= -1
-            print(df)
-            for add_row in range(add_column_num, 0, 1):
-                self.ws1.insert_cols(5, amount=1)
-                update_season = df["當季營收"].index[add_row]
-
-                '''  新增季度標籤  '''
-                self.write_to_excel(update_season, sheet=self.ws1, rows=1, cols=5, string="季度標籤",
-                                    date=f"{update_season}")
-                self.ws1.cell(row=1, column=5).fill = PatternFill(fill_type="solid", fgColor="DDDDDD")
-
-                for data in write_df_to_excel:
-                    self.write_to_excel(
-                        df.loc[update_season, data[2]],
-                        sheet=self.ws1,
-                        round_num=2,
-                        rows=data[0],
-                        cols=data[1],
-                        string=data[2],
-                        date=f"{update_season}"
-                    )
-                    if warning_on_excel.get(data[2]):
-                        warning_cond = warning_on_excel[data[2]]
-                        for i, cond in enumerate(warning_cond):
-                            if cond[update_season] and i == 0:
-                                self.warning_func(
-                                    True,
-                                    sheet=self.ws1,
-                                    rows=data[0],
-                                    cols=data[1],
-                                    threat=True
-                                )
-                                break
-                            elif cond[update_season] and i == 1:
-                                self.warning_func(
-                                    True,
-                                    sheet=self.ws1,
-                                    rows=data[0],
-                                    cols=data[1],
-                                    threat=False
-                                )
-
-            self.wb.save(path or self.file_path)
-            print("完成更新 {} 的 季報".format(stock_id))
-            self.msg_queue.put("完成更新 {} 的 季報".format(stock_id))
-
-    async def update_cash_flow(self, stock_id, path=None):
-        '''    從資料庫獲取季報最新日期    '''
-        cash_flow_for_investing = self.get_data_assign_table("投資活動之淨現金流入（流出）", 5)
-        cash_flow_for_investing = cash_flow_for_investing[stock_id]
-
-        '''    時間判斷    '''
-        latest_date = cash_flow_for_investing.dropna().index[-1]
-        if latest_date.month == 3:
-            year = latest_date.year - 1
-        else:
-            year = latest_date.year
-        table_year = self.ws2["D1"].value
-        add_column_num = year - int(table_year)
-
-        '''    確認當年資料是否需要更新    '''
-        if self.ws2["D4"].value != cash_flow_for_investing[-1]:
-            self.ws2.delete_cols(4, 1)
-            add_column_num += 1
-            print("當年度資料更新")
-            self.msg_queue.put("當年度資料更新")
-
-        if add_column_num <= 0:
-            print("No data need to update.")
-            self.msg_queue.put("No data need to update.")
-        else:
-            '''        根據相差月份取相對應數量的資料        '''
-            get_data_num = add_column_num * 4
-            target_cols = [
-                "投資活動之淨現金流入（流出）",
-                "營業活動之淨現金流入（流出）",
-                "籌資活動之淨現金流入（流出）",
-                "期初現金及約當現金餘額",
-                "期末現金及約當現金餘額"
-            ]
-            mapper, dfs = self.get_bundle_data(target_cols, get_data_num, stock_id)
-
-            df = TWStockRetrieveModule.parse_cash_df(dfs)
-            df = df.loc[stock_id]
-
-            target_pos = [
-                (4, 4, "理財活動現金"),
-                (3, 4, "營業活動現金"),
-                (6, 4, "籌資活動現金"),
-                (7, 4, "期初現金及約當現金餘額"),
-                (8, 4, "期末現金及約當現金餘額"),
-                (5, 4, "自由現金流量"),
-            ]
-            add_column_num *= -1
-            for add_row in range(add_column_num, 0, 1):
-                self.ws2.insert_cols(4, amount=1)
-                update_year = df.index[add_row]
-
-                '''  新增年度標籤  '''
-                self.write_to_excel(update_year, sheet=self.ws2, rows=1, cols=4, string="現金流量標籤", date=update_year)
-                self.ws2.cell(row=1, column=4).fill = PatternFill(fill_type="solid", fgColor="DDDDDD")
-
-                '''  新增營業活動現金、理財活動現金、自由現金流量、籌資活動現金 新增期初現金及約當現金餘額、期末現金及約當現金餘額'''
-                for pos in target_pos:
-                    value = df.loc[update_year, pos[2]]
-                    self.write_to_excel(
-                        value,
-                        round_num=1,
-                        sheet=self.ws2,
-                        rows=pos[0],
-                        cols=pos[1],
-                        string=pos[2],
-                        date=update_year
-                    )
-                    if pos[2] in ['營業活動現金', '自由現金流量']:
-                        self.warning_func(
-                            df.loc[update_year, pos[2]] < 0,
-                            sheet=self.ws2,
-                            rows=pos[0],
-                            cols=pos[1],
-                            threat=True
-                        )
-
-            self.wb.save(path or self.file_path)
-            print("完成更新 {} 的 現金流量表".format(stock_id))
-            self.msg_queue.put("完成更新 {} 的 現金流量表".format(stock_id))
-
-    async def update_per(self, stock_id, path=None):
-        '''    使用現在的時間當作最新的更新時間點    '''
-        now = datetime.datetime.now()
-        season_now = self.season_transform(now)
-
-        # 與table最新資料比對時間，決定需要增加的數據量
-        table_month = self.ws4["A16"].value
-        diff_year, diff_season = (int(season_now[0:4]) - int(table_month[0:4])), (int(season_now[-1]) - int(table_month[-1]))
-        add_row_num = 4 * diff_year + diff_season
-
-        if add_row_num <= 0:
-            print("Update PER this year.")
-            self.msg_queue.put("Update PER this year.")
-        else:
-            print("Increase PER this season and update PER this year.")
-            self.msg_queue.put("Increase PER this season and update PER this year.")
-
-        # 更新當下是第幾季度，從Q1到當下都是更新目標
-        update_row_num = int(table_month[-1])
-
-        # 根據需要跟新以及新增的數量，去從sqlite3抓取相對應的數據量
-        total_num = update_row_num + add_row_num
-        get_data_num = total_num + 4
-        equity = self.get_data_assign_table("股本合計", get_data_num) * 0.00001  # 單位: 億
-        profit_after_tax = self.get_data_assign_table("本期淨利（淨損）", get_data_num) * 0.00001  # 單位: 億
-
-        price_num = total_num * 100
-        price_df = self.get_data_assign_table("收盤價", price_num)
-        equity = equity[stock_id].dropna()
-        profit_after_tax = profit_after_tax[stock_id].dropna()
-        price_df = price_df[stock_id].dropna()
-        price_df.index = price_df.index.to_period("Q")
-        price_df = price_df.groupby([price_df.index]).last()
-
-        eps = profit_after_tax / (equity / 10)
-        estimated_eps = eps.rolling(4).sum()
-
-        '''  檢查公布財報的EPS時間與實際時間的差別，如果尚未公布財報則填入現在的時間，新增最新時間資料  '''
-        fr_date = self.season_transform(estimated_eps.index[-1])
-        num = 4 * (int(season_now[0:4]) - int(fr_date[0:4])) + (int(season_now[-1]) - int(fr_date[-1]))
-        for n in range(num):
-            date = self.delta_seasons(estimated_eps.index[-1], -1)
-            estimated_eps[date] = estimated_eps[-1]
-
-        estimated_eps.index = self.season_transform(estimated_eps.index, spec=True)
-
-        # 新增PER資料
-        for add_row in range(-1*total_num, 0, 1):
-            row = 16 + -1*(add_row+update_row_num) if add_row + update_row_num < -1*add_row_num else 16
-            if row == 16:
-                self.ws4.insert_rows(16, amount=1)
-
-            update_season_date = estimated_eps.index[add_row]
-
-            '''  新增季度標籤  '''
-            update_season = self.season_transform(update_season_date)
-            self.write_to_excel(update_season, sheet=self.ws4, rows=row, cols=1, string="PER季度標籤",
-                                date=f"{update_season}")
-            self.ws4.cell(row=row, column=1).fill = PatternFill(fill_type="solid", fgColor="DDDDDD")
-
-            '''  新增本益比  '''
-            try:
-                price = price_df.loc[update_season]
-            except Exception as e:
-                print(f"有問題發生，請檢查{e}")
-                self.msg_queue.put(f"有問題發生，請檢查{e}")
-                price = 0.0
-
-            e_eps = estimated_eps.loc[update_season]
-            per = price / e_eps
-
-            print(f"使用季度: {update_season} 所得到的EPS: {round(e_eps, 2)}")
-            self.msg_queue.put(f"使用季度: {update_season} 所得到的EPS: {round(e_eps, 2)}")
-            self.write_to_excel(per, round_num=2, sheet=self.ws4, rows=row, cols=2, string="新增PER", date=update_season)
-
-        self.wb.save(path or self.file_path)
-        print("完成更新 {} 的 本益比".format(stock_id))
-        self.msg_queue.put("完成更新 {} 的 本益比".format(stock_id))
-
-    async def update_price_today(self, stock_id, path=None):
-        total_cols = ['最高價', '最低價', '開盤價', '收盤價']
-        excel_pos = [(12, 3), (13, 3), (12, 5), (13, 5)]
-
-        mapper, dfs = self.get_bundle_data(total_cols, 1, stock_id)
-        df = pd.concat(dfs, axis=1)
-        df = df.loc[stock_id]
-        date_str = df.index[0].strftime("%Y/%m/%d")
-
-        self.write_to_excel(
-            date_str, sheet=self.ws4, rows=13, cols=1, string=f"新增{date_str}"
-        )
-        for col, pos in zip(total_cols, excel_pos):
-            self.write_to_excel(
-                df[col].iloc[0], round_num=1, sheet=self.ws4, rows=pos[0], cols=pos[1], string=f"新增{col}", date=date_str
-            )
-
-        self.wb.save(path or self.file_path)
-        print("完成更新 {} 的 價位".format(stock_id))
-        self.msg_queue.put("完成更新 {} 的 價位".format(stock_id))
-
-
 class SelectStock(RetrieveDataModule):
     def __init__(self, conn, msg_queue):
         super().__init__(conn, msg_queue)
@@ -1086,58 +500,57 @@ class TWStockRetrieveModule(RetrieveDataModule):
             "月營收年增率": cls.month_df["月營收年增率"],
         }
 
-    @classmethod
-    def parse_price_estimation(cls, month_df, season_df, price_df):
-        price_df = price_df.groupby(['stock_id', pd.Grouper(level='date', freq='S')]).last()
-        season_df["每股稅後盈餘四季總和"] = season_df.groupby("stock_id")["每股稅後盈餘"].rolling(4).sum()
-        season_df["本益比"] = price_df / season_df["每股稅後盈餘四季總和"]
-        per_df = season_df.groupby("stock_id")["本益比"].aggregate(['min', 'mean', 'max'])
-
-        month_df[["短期月營收", "短期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].rolling(3).sum()
-        month_df[["中期月營收", "中期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].rolling(6).sum()
-        month_df[["長期月營收", "長期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].rolling(12).sum()
-        month_df = month_df.groupby("stock_id").last()
-
-        df = pd.DataFrame(dtype=float)
-        df["短期"] = month_df[["短期月營收", "短期月營收年增"]]
-        df["中期"] = month_df[["中期月營收", "中期月營收年增"]]
-        df["長期"] = month_df[["長期月營收", "長期月營收年增"]]
-
-        df = df.rename(index={0: "月營收", 1: "營收年增"})
-
-        df.concat([df, pd.DataFrame({})])
-        max_mr_yg, min_mr_yg = df.loc["營收年增"].max(), df.loc["營收年增"].min()
-        pat_1st = df["短期"].loc["平均稅後淨利"]
-
-        greatest_pat = pd.DataFrame({
-            "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
-            "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
-            "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-        }).T
-        wrost_pat = pd.DataFrame({
-            "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-            "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-            "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-        }).T
-
-        est_df = pd.DataFrame({
-            "樂觀推估營收": df.loc["月營收"] * (1 + max_mr_yg / 100),
-            "悲觀推估營收": df.loc["月營收"] * (1 + min_mr_yg / 100),
-        })
-        est_df["樂觀推估稅後淨利"] = est_df["樂觀推估營收"] * pat_1st
-        est_df["悲觀推估稅後淨利"] = est_df["悲觀推估營收"] * pat_1st
-        est_df["樂觀推估eps"] = (est_df["樂觀推估稅後淨利"] + greatest_pat[0]) / equity.iloc[-1]
-        est_df["悲觀推估eps"] = (est_df["悲觀推估稅後淨利"] + wrost_pat[0]) / equity.iloc[-1]
-        est_df["樂觀推估價位"] = est_df["樂觀推估eps"] * per_df.loc["mean"]
-        est_df["悲觀推估稅後淨利"] = est_df["悲觀推估eps"] * per_df.loc["mean"]
-
-        # Empty_profit = pd.Series(table_name='* 獲利能力', index=SR.index)
-
-        dfs = [est_df, per]
-        final = pd.concat(dfs).rename(columns={0: "本益比"}).round(1).T
-
-        return final.reset_index().rename(columns={"index": "項目"})
-
+    # @classmethod
+    # def parse_price_estimation(cls, month_df, season_df, price_df):
+    #     price_df = price_df.groupby(['stock_id', pd.Grouper(level='date', freq='S')]).last()
+    #     season_df["每股稅後盈餘四季總和"] = season_df.groupby("stock_id")["每股稅後盈餘"].rolling(4).sum()
+    #     season_df["本益比"] = price_df / season_df["每股稅後盈餘四季總和"]
+    #     per_df = season_df.groupby("stock_id")["本益比"].aggregate(['min', 'mean', 'max'])
+    #
+    #     month_df[["短期月營收", "短期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].transform(lambda s: s.rolling(3).sum())
+    #     month_df[["中期月營收", "中期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].transform(lambda s: s.rolling(6).sum())
+    #     month_df[["長期月營收", "長期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].transform(lambda s: s.rolling(12).sum())
+    #     month_df = month_df.groupby("stock_id").last()
+    #
+    #     df = pd.DataFrame(dtype=float)
+    #     df["短期"] = month_df[["短期月營收", "短期月營收年增"]]
+    #     df["中期"] = month_df[["中期月營收", "中期月營收年增"]]
+    #     df["長期"] = month_df[["長期月營收", "長期月營收年增"]]
+    #
+    #     df = df.rename(index={0: "月營收", 1: "營收年增"})
+    #
+    #     df.concat([df, pd.DataFrame({})])
+    #     max_mr_yg, min_mr_yg = df.loc["營收年增"].max(), df.loc["營收年增"].min()
+    #     pat_1st = df["短期"].loc["平均稅後淨利"]
+    #
+    #     greatest_pat = pd.DataFrame({
+    #         "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
+    #         "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
+    #         "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
+    #     }).T
+    #     wrost_pat = pd.DataFrame({
+    #         "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
+    #         "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
+    #         "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
+    #     }).T
+    #
+    #     est_df = pd.DataFrame({
+    #         "樂觀推估營收": df.loc["月營收"] * (1 + max_mr_yg / 100),
+    #         "悲觀推估營收": df.loc["月營收"] * (1 + min_mr_yg / 100),
+    #     })
+    #     est_df["樂觀推估稅後淨利"] = est_df["樂觀推估營收"] * pat_1st
+    #     est_df["悲觀推估稅後淨利"] = est_df["悲觀推估營收"] * pat_1st
+    #     est_df["樂觀推估eps"] = (est_df["樂觀推估稅後淨利"] + greatest_pat[0]) / equity.iloc[-1]
+    #     est_df["悲觀推估eps"] = (est_df["悲觀推估稅後淨利"] + wrost_pat[0]) / equity.iloc[-1]
+    #     est_df["樂觀推估價位"] = est_df["樂觀推估eps"] * per_df.loc["mean"]
+    #     est_df["悲觀推估稅後淨利"] = est_df["悲觀推估eps"] * per_df.loc["mean"]
+    #
+    #     # Empty_profit = pd.Series(table_name='* 獲利能力', index=SR.index)
+    #
+    #     dfs = [est_df, per]
+    #     final = pd.concat(dfs).rename(columns={0: "本益比"}).round(1).T
+    #
+    #     return final.reset_index().rename(columns={"index": "項目"})
 
     @classmethod
     def retrieve_month_data(cls, stock_id):
@@ -1180,8 +593,8 @@ class TWStockRetrieveModule(RetrieveDataModule):
         price_df.index = price_df.index.map(lambda s: (s[0], s[1].strftime("%b-%y")))
 
         # 計算3個月以及12個月的移動平均數
-        df["3個月移動平均年增率"] = df.groupby('stock_id')["去年同月增減(%)"].rolling(3).mean()
-        df["12個月移動平均年增率"] = df.groupby('stock_id')["去年同月增減(%)"].rolling(12).mean()
+        df["3個月移動平均年增率"] = df.groupby('stock_id')["去年同月增減(%)"].transform(lambda s: s.rolling(3).mean())
+        df["12個月移動平均年增率"] = df.groupby('stock_id')["去年同月增減(%)"].transform(lambda s: s.rolling(12).mean())
 
         df = df.reset_index().set_index(["stock_id", "date"])
         df.index = df.index.map(lambda s: (s[0], s[1].strftime("%b-%y")))
@@ -1225,7 +638,7 @@ class TWStockRetrieveModule(RetrieveDataModule):
         df["營業利益成長率"] = 100 * (df["營業利益率"] / df["營業利益率"].shift(1)) - 100
         df["股本季增率"] = df.groupby("stock_id")["營業收入合計"].transform(lambda s: 100 * (s / s.shift(1)) - 100)
         df["市值"] = season_report_price * df["股本合計"] / 10  # 市值 = 股價 * 總股數 (股本合計單位為 k元)
-        df["營收市值比"] = df.groupby("stock_id")["營業收入合計"].rolling(4).sum()
+        df["營收市值比"] = df.groupby("stock_id")["營業收入合計"].transform(lambda s: s.rolling(4).sum())
         df["營收市值比"] = df["營收市值比"] / df["市值"] * 100
         df["稅前淨利率"] = 100 * (df["繼續營業單位稅前淨利（淨損）"] / df["營業收入合計"])
         df["本業收入比率"] = 100 * (df["營業利益（損失）"] / df["繼續營業單位稅前淨利（淨損）"])
@@ -1286,8 +699,8 @@ class TWStockRetrieveModule(RetrieveDataModule):
             en[1]: en
             for en in remain_cols
         }
-        df.index = df.index.map(lambda s: (s[0], s[1].to_period("Q").strftime('%yQ%q')))
-        return df.rename(columns=rename_cols)[remain_cols]
+        df.index = df.index.map(lambda s: (s[0], cls.season_determination(s[1])))
+        return df.rename(columns=rename_cols)[remain_cols].round(2)
 
     @classmethod
     def parse_cash_df(cls, dfs):
@@ -1358,3 +771,589 @@ class TWStockRetrieveModule(RetrieveDataModule):
         elif c_roe.name[1].month == 11:
             return c_roe * 4 / 3
         return c_roe
+
+    @staticmethod
+    def season_determination(date):
+        year = date.year
+        if date.month <= 3:
+            season = 4
+            year = year - 1
+        elif date.month <= 5:
+            season = 1
+        elif date.month <= 8:
+            season = 2
+        elif date.month <= 11:
+            season = 3
+        elif date.month <= 12:
+            season = 4
+        else:
+            print("Wrong month to determine")
+        return f"{year}Q{season}"
+
+
+class FinancialAnalysis(TWStockRetrieveModule, CrawlerConnection):
+    def __init__(self, db_path, msg_queue, file_path):
+        self.file_path = file_path
+        self.wb = load_workbook(self.file_path)
+        self.ws0 = self.wb["月財報"]
+        self.ws1 = self.wb["季財報"]
+        self.ws2 = self.wb["現金流量"]
+        self.ws3 = self.wb["進出場參考"]
+        self.ws4 = self.wb["合理價推估"]
+        self.msg_queue = msg_queue
+        conn = sqlite3.connect(db_path)
+        super().__init__(conn, msg_queue)
+
+    @staticmethod
+    def season_transform(date, spec=None):
+        if date is not pd.Series(dtype='object'):
+            date = pd.Series(date)
+        df = pd.DataFrame()
+        df['Quarter'] = pd.to_datetime(date)
+        df['Quarter'] = df['Quarter'].dt.to_period('Q').dt.strftime("%YQ%q")
+        if spec:
+            return df['Quarter']
+        else:
+            return df['Quarter'].iloc[-1]
+
+    @staticmethod
+    def diff_months(str1, str2):
+        year1 = datetime.datetime.strptime(str1[0:10], "%Y-%m").year
+        year2 = datetime.datetime.strptime(str2[0:10], "%Y-%m").year
+        month1 = datetime.datetime.strptime(str1[0:10], "%Y-%m").month
+        month2 = datetime.datetime.strptime(str2[0:10], "%Y-%m").month
+        num = (year1 - year2) * 12 + (month1 - month2)
+        return num
+
+    @classmethod
+    def delta_seasons(cls, date, delta):
+        str1 = TWStockRetrieveModule.season_determination(date)
+        year = int(str1[0:4])
+        s = int(str1[-1])
+
+        season = s - delta
+        while season <= 0:
+            season += 4
+            year -= 1
+        while season >= 5:
+            season -= 4
+            year += 1
+
+        if season == 4:
+            month = 3
+            day = 31
+            year += 1
+        elif season == 3:
+            month = 11
+            day = 14
+        elif season == 2:
+            month = 8
+            day = 14
+        elif season == 1:
+            month = 5
+            day = 15
+        else:
+            print("Wrong season")
+        return datetime.datetime(year, month, day)
+
+    @staticmethod
+    def warning_func(use_cond, sheet=None, rows=None, cols=None, threat=None):
+        if use_cond:
+            if threat:
+                sheet.cell(row=rows, column=cols).font = Font(color='FF0000', bold=True)  # 紅色
+                sheet.cell(row=rows, column=cols).fill = PatternFill(fill_type="solid", fgColor="FFFFBB")
+                side_style = Side(style="thin", color="FF0000")
+                sheet.cell(row=rows, column=cols).border = Border(left=side_style, right=side_style, top=side_style,
+                                                                  bottom=side_style)
+                sheet.cell(row=rows, column=1).fill = PatternFill(fill_type="solid", fgColor="AA0000")  # 深紅色
+            else:
+                sheet.cell(row=rows, column=cols).font = Font(color='FF0000', bold=False)  # 紅色
+                sheet.cell(row=rows, column=cols).fill = PatternFill(fill_type="solid", fgColor="FFFFBB")
+                sheet.cell(row=rows, column=1).fill = PatternFill(fill_type="solid", fgColor="FFAA33")  # 橘色
+        else:
+            sheet.cell(row=rows, column=cols).font = Font(color='000000')  # 黑色
+            sheet.cell(row=rows, column=1).fill = PatternFill(fill_type="solid", fgColor="FFFFFF")  # 白色
+
+    @staticmethod
+    def _estimate_roe(c_roe):
+        if c_roe.name.month == 5:
+            return c_roe * 4
+        elif c_roe.name.month == 8:
+            return c_roe * 2
+        elif c_roe.name.month == 11:
+            return c_roe * 4 / 3
+        return c_roe
+
+    def write_to_excel(self, data, round_num=None, sheet=None, rows=None, cols=None, string="", date=None):
+        if round_num:
+            data = round(data, round_num)
+        sheet.cell(row=rows, column=cols).value = data
+        sheet.cell(row=rows, column=cols).alignment = Alignment(horizontal="center", vertical="center",
+                                                                wrap_text=True)
+        if string:
+            msg = f"新增{date}的{string}: {data}"
+            self.msg_queue.put(msg)
+            print(msg)
+
+    @staticmethod
+    def get_cash_flow(raw_data):
+        # 抓每年的Q4與最後一筆
+        q4_data = raw_data[raw_data.index.month == 3]
+        df_data = pd.concat([q4_data, raw_data.iloc[-1:]]).drop_duplicates()
+        df_data.index = [datetime.datetime(idx.year - 1, idx.month, 1) if idx.month == 3 else idx for idx in df_data.index]
+        return df_data
+
+    async def update_monthly_report(self, stock_id, path=None):
+        '''    從資料庫獲取月營收最新日期    '''
+        revenue_month = self.get_data('當月營收', 2)
+
+        '''    時間判斷    '''
+        # 改成用資料庫的最新時間尤佳
+        latest_date = revenue_month[stock_id].dropna().index[-1]
+        latest_date_str = datetime.datetime.strftime(latest_date, '%Y-%m')
+        table_month = datetime.datetime.strftime(self.ws0["A5"].value, '%Y-%m')
+
+        if table_month == latest_date_str:
+            self.msg_queue.put("No month data need to update.")
+            print("No month data need to update.")
+        else:
+            add_row_num = self.diff_months(latest_date_str, table_month)
+
+            '''        根據相差月份取相對應數量的資料        '''
+            add_revenue = add_row_num + 24
+            target_cols = ['當月營收', '上月比較增減(%)', '去年同月增減(%)']
+            mapper, dfs = self.get_bundle_data(target_cols, add_revenue, stock_id)
+            mapper, price_dfs = self.get_bundle_data(['收盤價'], add_row_num*40, stock_id)
+            df = TWStockRetrieveModule.parse_month_df(dfs, price_dfs[0])
+            df = df.loc[stock_id]
+
+            target_pos = [
+                (5, 2, "月營收(億)"),
+                (5, 3, "月營收月增率"),
+                (5, 4, "月營收年增率"),
+                (5, 19, "3個月移動平均年增率"),
+                (5, 20, "12個月移動平均年增率"),
+                (5, 8, "最低股價"),
+                (5, 7, "平均股價"),
+                (5, 6, "最高股價"),
+            ]
+
+            add_row_num -= 1
+            for add_row in range(add_row_num, -1, -1):
+                self.ws0.insert_rows(5, amount=1)
+
+                '''  新增月份  '''
+                update_month = (latest_date - relativedelta(months=add_row))
+                self.write_to_excel(
+                    update_month, sheet=self.ws0, rows=5, cols=1, string="月份標籤", date=f"{update_month}"
+                )
+                self.ws0.cell(row=5, column=1).number_format = "mmm-yy"
+
+                '''        更新營收        '''
+                for pos in target_pos:
+                    target_month = update_month.strftime("%b-%y")
+                    self.write_to_excel(
+                        df.loc[target_month, pos[2]],
+                        sheet=self.ws0,
+                        rows=pos[0],
+                        cols=pos[1],
+                        string=pos[2],
+                        date=f"{update_month}"
+                    )
+                    if pos[2] in ['月營收月增率', '月營收年增率']:
+                        self.warning_func(
+                            df.loc[target_month, pos[2]] >= 0,
+                            sheet=self.ws0,
+                            rows=pos[0],
+                            cols=pos[1],
+                            threat=False
+                        )
+
+            self.wb.save(path or self.file_path)
+            print("完成更新 {} 的 月報".format(stock_id))
+            self.msg_queue.put("完成更新 {} 的 月報".format(stock_id))
+
+    async def update_directors_and_supervisors(self, stock_id, path=None):
+        url = "https://goodinfo.tw/StockInfo/StockDirectorSharehold.asp?STOCK_ID={}".format(str(stock_id))
+        r = await self.requests_get(url)
+
+        dfs = pd.read_html(StringIO(r.text))
+        df = pd.concat([df for df in dfs if df.shape[1] > 15 and df.shape[0] > 30])
+        idx = pd.IndexSlice
+        df = df.loc[idx[:], idx[["月別", "全體董監持股"], :]]
+        df.columns = df.columns.get_level_values(1)
+        df = df.set_index(["月別"])
+        df.columns = df.columns.str.replace(' ', '')
+
+        df["持股(%)"] = pd.to_numeric(df["持股(%)"], errors="coerce")
+        df = df[~ df["持股(%)"].isnull()].dropna()["持股(%)"]
+
+        df = df.rename(index=lambda s: s.replace("/", "-"))
+        data, index = [], []
+        for cells in list(self.ws0.columns):
+            data.append(cells[9].value)
+            index.append(cells[0].value)
+        data = data[4:]
+        index = index[4:]
+
+        data_now = pd.DataFrame({'date': index, 'Data': data})
+        data_now = data_now[data_now['date'].notnull()].rename(index=lambda s: s + 5)
+
+        # 確認爬蟲到的最新資料是否與excel的資料時間點相同，沒有就刪除excel資料點
+        while datetime.datetime.strftime(data_now['date'].iloc[0], "%Y-%m") != df.index[0]:
+            data_now = data_now.drop(data_now.index[0])
+        update_data = data_now[data_now['Data'].isnull()]
+
+        pd.options.mode.chained_assignment = None
+
+        for n in range(len(update_data)):
+            date = update_data['date'].iloc[n]
+            date_str = datetime.datetime.strftime(date, "%Y-%m")
+            try:
+                update_data['Data'].iloc[n] = df.loc[date_str]
+                r = update_data.index[n]
+                if self.ws0.cell(row=r, column=1).value == date:
+                    self.write_to_excel(
+                        update_data['Data'].iloc[n],
+                        sheet=self.ws0,
+                        rows=r,
+                        cols=10,
+                        string="股東占比",
+                        date=date_str
+                    )
+            except Exception as e:
+                print(f"Doesn't get {date_str} Data")
+                self.msg_queue.put(f"Doesn't get {date_str} Data")
+
+        self.wb.save(path or self.file_path)
+        print("完成更新 {} 的 股東占比".format(stock_id))
+        self.msg_queue.put("完成更新 {} 的 股東占比".format(stock_id))
+
+    async def update_season_report(self, stock_id, path=None):
+        '''    從資料庫獲取季報最新日期    '''
+        revenue_season = self.get_data_assign_table('營業收入合計', 5)
+        revenue_season = revenue_season[stock_id]
+
+        '''    時間判斷    '''
+        # 改成用資料庫的最新時間尤佳
+        latest_date = revenue_season.dropna().index[-1]
+        latest_date_str = TWStockRetrieveModule.season_determination(latest_date)
+        table_month = self.ws1["E1"].value
+        add_column_num = 4 * (int(latest_date_str[0:4]) - int(table_month[0:4])) + (
+                int(latest_date_str[-1]) - int(table_month[-1]))
+
+        if add_column_num <= 0:
+            print("No data need to update.")
+            self.msg_queue.put("No data need to update.")
+        else:
+            '''        根據相差月份取相對應數量的資料        '''
+            get_data_num = add_column_num + 6
+            target_cols = [
+                '營業收入合計',
+                '營業利益（損失）',
+                '營業毛利（毛損）',
+                "股本合計",
+                "繼續營業單位稅前淨利（淨損）",
+                "本期淨利（淨損）",
+                "營業成本合計",
+                "應收帳款淨額",
+                "存貨",
+                "資產總計",
+                "負債總計",
+                "應付帳款",
+                "無形資產",
+                "折舊費用",
+                '權益總計',
+                '權益總額',
+            ]
+            mapper, dfs = self.get_bundle_data(target_cols, get_data_num, stock_id, assign_table={"折舊費用": "cash_flows"})
+            mapper, price_dfs = self.get_bundle_data(["收盤價"], add_column_num*65, stock_id)
+            df = TWStockRetrieveModule.parse_season_df(dfs, price_dfs[0])
+            df = df.loc[stock_id]
+            df = df.rename(columns={
+                cols: cols[1]
+                for cols in df.columns
+            })
+
+            condition_df = pd.DataFrame()
+            condition_df["季營收年增率"] = df["季營收年增率"] <= 0
+            condition_df["營業利益成長率t"] = df["營業利益成長率"] < -30
+            condition_df["營業利益成長率"] = df["營業利益成長率"].between(-30, -20)
+            condition_df["營收市值比"] = df["營收市值比"] < 20
+            condition_df["每股稅後盈餘年成長率"] = df["每股稅後盈餘年成長率"] < 0
+            condition_df["負債總資產占比"] = df["負債總資產占比"] > 40
+            condition_df["無形資產占比"] = df["無形資產占比"] > 10
+            condition_df["無形資產占比t"] = df["無形資產占比"] > 30
+            condition_df["折舊負擔比率"] = df["折舊負擔比率"] > df["營業利益率"]
+
+            warning_on_excel = {
+                "季營收年增率": [df["季營收年增率"] <= 0],
+                "營業利益成長率": [df["營業利益成長率"] < -30, df["營業利益成長率"].between(-30, -20)],
+                "營收市值比": [df["營收市值比"] < 20],
+                "每股稅後盈餘年成長率": [df["每股稅後盈餘年成長率"] < 0],
+                "負債總資產占比": [df["負債總資產占比"] > 40],
+                "無形資產占比": [df["無形資產占比"] > 10, df["無形資產占比"] > 30],
+                "折舊負擔比率": [df["折舊負擔比率"] > df["營業利益率"]],
+            }
+            write_df_to_excel = [
+                (3, 5, "當季營收",),
+                (4, 5, "季營收年增率",),
+                (5, 5, "市值",),
+                (6, 5, "營業毛利率",),
+                (7, 5, "營業利益率",),
+                (8, 5, "營業利益成長率",),
+                (9, 5, "稅前淨利率",),
+                (10, 5, "本業收入比率",),
+                (11, 5, "稅後淨利率",),
+                (12, 5, "稅後淨利年增率",),
+                (13, 5, "每股稅後盈餘",),
+                (14, 5, "每股稅後盈餘年成長率",),
+
+                (16, 5, "應收帳款週轉率",),
+                (17, 5, "存貨周轉率",),
+                (18, 5, "存貨占營收比",),
+                (19, 5, "營收市值比",),
+
+                (21, 5, "股本合計",),
+                (22, 5, "股本季增率",),
+                (23, 5, "供應商應付帳款總資產占比",),
+                (24, 5, "負債總資產占比",),
+                (25, 5, "無形資產占比",),
+
+                (27, 5, "遞減折舊費用",),
+                (28, 5, "折舊負擔比率",),
+
+                (30, 5, "累積股東權益報酬率(季)",),
+                (31, 5, "股東權益報酬率(年預估)",),
+                (32, 5, "累積稅後淨利率",),
+                (33, 5, "總資產週轉率(次/年)",),
+                (34, 5, "權益係數",),
+                (35, 5, "累積股東權益資產轉換率",),
+            ]
+
+            add_column_num *= -1
+            print(df)
+            for add_row in range(add_column_num, 0, 1):
+                self.ws1.insert_cols(5, amount=1)
+                update_season = df["當季營收"].index[add_row]
+
+                '''  新增季度標籤  '''
+                self.write_to_excel(update_season, sheet=self.ws1, rows=1, cols=5, string="季度標籤",
+                                    date=f"{update_season}")
+                self.ws1.cell(row=1, column=5).fill = PatternFill(fill_type="solid", fgColor="DDDDDD")
+
+                for data in write_df_to_excel:
+                    self.write_to_excel(
+                        df.loc[update_season, data[2]],
+                        sheet=self.ws1,
+                        round_num=2,
+                        rows=data[0],
+                        cols=data[1],
+                        string=data[2],
+                        date=f"{update_season}"
+                    )
+                    if warning_on_excel.get(data[2]):
+                        warning_cond = warning_on_excel[data[2]]
+                        for i, cond in enumerate(warning_cond):
+                            if cond[update_season] and i == 0:
+                                self.warning_func(
+                                    True,
+                                    sheet=self.ws1,
+                                    rows=data[0],
+                                    cols=data[1],
+                                    threat=True
+                                )
+                                break
+                            elif cond[update_season] and i == 1:
+                                self.warning_func(
+                                    True,
+                                    sheet=self.ws1,
+                                    rows=data[0],
+                                    cols=data[1],
+                                    threat=False
+                                )
+
+            self.wb.save(path or self.file_path)
+            print("完成更新 {} 的 季報".format(stock_id))
+            self.msg_queue.put("完成更新 {} 的 季報".format(stock_id))
+
+    async def update_cash_flow(self, stock_id, path=None):
+        '''    從資料庫獲取季報最新日期    '''
+        cash_flow_for_investing = self.get_data_assign_table("投資活動之淨現金流入（流出）", 5)
+        cash_flow_for_investing = cash_flow_for_investing[stock_id]
+
+        '''    時間判斷    '''
+        latest_date = cash_flow_for_investing.dropna().index[-1]
+        if latest_date.month == 3:
+            year = latest_date.year - 1
+        else:
+            year = latest_date.year
+        table_year = self.ws2["D1"].value
+        add_column_num = year - int(table_year)
+
+        '''    確認當年資料是否需要更新    '''
+        if self.ws2["D4"].value != cash_flow_for_investing[-1]:
+            self.ws2.delete_cols(4, 1)
+            add_column_num += 1
+            print("當年度資料更新")
+            self.msg_queue.put("當年度資料更新")
+
+        if add_column_num <= 0:
+            print("No data need to update.")
+            self.msg_queue.put("No data need to update.")
+        else:
+            '''        根據相差月份取相對應數量的資料        '''
+            get_data_num = add_column_num * 4
+            target_cols = [
+                "投資活動之淨現金流入（流出）",
+                "營業活動之淨現金流入（流出）",
+                "籌資活動之淨現金流入（流出）",
+                "期初現金及約當現金餘額",
+                "期末現金及約當現金餘額"
+            ]
+            mapper, dfs = self.get_bundle_data(target_cols, get_data_num, stock_id)
+
+            df = TWStockRetrieveModule.parse_cash_df(dfs)
+            df = df.loc[stock_id]
+
+            target_pos = [
+                (4, 4, "理財活動現金"),
+                (3, 4, "營業活動現金"),
+                (6, 4, "籌資活動現金"),
+                (7, 4, "期初現金及約當現金餘額"),
+                (8, 4, "期末現金及約當現金餘額"),
+                (5, 4, "自由現金流量"),
+            ]
+            add_column_num *= -1
+            for add_row in range(add_column_num, 0, 1):
+                self.ws2.insert_cols(4, amount=1)
+                update_year = df.index[add_row]
+
+                '''  新增年度標籤  '''
+                self.write_to_excel(update_year, sheet=self.ws2, rows=1, cols=4, string="現金流量標籤", date=update_year)
+                self.ws2.cell(row=1, column=4).fill = PatternFill(fill_type="solid", fgColor="DDDDDD")
+
+                '''  新增營業活動現金、理財活動現金、自由現金流量、籌資活動現金 新增期初現金及約當現金餘額、期末現金及約當現金餘額'''
+                for pos in target_pos:
+                    value = df.loc[update_year, pos[2]]
+                    self.write_to_excel(
+                        value,
+                        round_num=1,
+                        sheet=self.ws2,
+                        rows=pos[0],
+                        cols=pos[1],
+                        string=pos[2],
+                        date=update_year
+                    )
+                    if pos[2] in ['營業活動現金', '自由現金流量']:
+                        self.warning_func(
+                            df.loc[update_year, pos[2]] < 0,
+                            sheet=self.ws2,
+                            rows=pos[0],
+                            cols=pos[1],
+                            threat=True
+                        )
+
+            self.wb.save(path or self.file_path)
+            print("完成更新 {} 的 現金流量表".format(stock_id))
+            self.msg_queue.put("完成更新 {} 的 現金流量表".format(stock_id))
+
+    async def update_per(self, stock_id, path=None):
+        '''    使用現在的時間當作最新的更新時間點    '''
+        now = datetime.datetime.now()
+        season_now = self.season_transform(now)
+
+        # 與table最新資料比對時間，決定需要增加的數據量
+        table_month = self.ws4["A16"].value
+        diff_year, diff_season = (int(season_now[0:4]) - int(table_month[0:4])), (int(season_now[-1]) - int(table_month[-1]))
+        add_row_num = 4 * diff_year + diff_season
+
+        if add_row_num <= 0:
+            print("Update PER this year.")
+            self.msg_queue.put("Update PER this year.")
+        else:
+            print("Increase PER this season and update PER this year.")
+            self.msg_queue.put("Increase PER this season and update PER this year.")
+
+        # 更新當下是第幾季度，從Q1到當下都是更新目標
+        update_row_num = int(table_month[-1])
+
+        # 根據需要跟新以及新增的數量，去從sqlite3抓取相對應的數據量
+        total_num = update_row_num + add_row_num
+        get_data_num = total_num + 4
+        equity = self.get_data_assign_table("股本合計", get_data_num) * 0.00001  # 單位: 億
+        profit_after_tax = self.get_data_assign_table("本期淨利（淨損）", get_data_num) * 0.00001  # 單位: 億
+
+        price_num = total_num * 100
+        price_df = self.get_data_assign_table("收盤價", price_num)
+        equity = equity[stock_id].dropna()
+        profit_after_tax = profit_after_tax[stock_id].dropna()
+        price_df = price_df[stock_id].dropna()
+        price_df.index = price_df.index.to_period("Q")
+        price_df = price_df.groupby([price_df.index]).last()
+
+        eps = profit_after_tax / (equity / 10)
+        estimated_eps = eps.rolling(4).sum()
+
+        '''  檢查公布財報的EPS時間與實際時間的差別，如果尚未公布財報則填入現在的時間，新增最新時間資料  '''
+        fr_date = self.season_transform(estimated_eps.index[-1])
+        num = 4 * (int(season_now[0:4]) - int(fr_date[0:4])) + (int(season_now[-1]) - int(fr_date[-1]))
+        for n in range(num):
+            date = self.delta_seasons(estimated_eps.index[-1], -1)
+            estimated_eps[date] = estimated_eps[-1]
+
+        estimated_eps.index = self.season_transform(estimated_eps.index, spec=True)
+
+        # 新增PER資料
+        for add_row in range(-1*total_num, 0, 1):
+            row = 16 + -1*(add_row+update_row_num) if add_row + update_row_num < -1*add_row_num else 16
+            if row == 16:
+                self.ws4.insert_rows(16, amount=1)
+
+            update_season_date = estimated_eps.index[add_row]
+
+            '''  新增季度標籤  '''
+            update_season = self.season_transform(update_season_date)
+            self.write_to_excel(update_season, sheet=self.ws4, rows=row, cols=1, string="PER季度標籤",
+                                date=f"{update_season}")
+            self.ws4.cell(row=row, column=1).fill = PatternFill(fill_type="solid", fgColor="DDDDDD")
+
+            '''  新增本益比  '''
+            try:
+                price = price_df.loc[update_season]
+            except Exception as e:
+                print(f"有問題發生，請檢查{e}")
+                self.msg_queue.put(f"有問題發生，請檢查{e}")
+                price = 0.0
+
+            e_eps = estimated_eps.loc[update_season]
+            per = price / e_eps
+
+            print(f"使用季度: {update_season} 所得到的EPS: {round(e_eps, 2)}")
+            self.msg_queue.put(f"使用季度: {update_season} 所得到的EPS: {round(e_eps, 2)}")
+            self.write_to_excel(per, round_num=2, sheet=self.ws4, rows=row, cols=2, string="新增PER", date=update_season)
+
+        self.wb.save(path or self.file_path)
+        print("完成更新 {} 的 本益比".format(stock_id))
+        self.msg_queue.put("完成更新 {} 的 本益比".format(stock_id))
+
+    async def update_price_today(self, stock_id, path=None):
+        total_cols = ['最高價', '最低價', '開盤價', '收盤價']
+        excel_pos = [(12, 3), (13, 3), (12, 5), (13, 5)]
+
+        mapper, dfs = self.get_bundle_data(total_cols, 1, stock_id)
+        df = pd.concat(dfs, axis=1)
+        df = df.loc[stock_id]
+        date_str = df.index[0].strftime("%Y/%m/%d")
+
+        self.write_to_excel(
+            date_str, sheet=self.ws4, rows=13, cols=1, string=f"新增{date_str}"
+        )
+        for col, pos in zip(total_cols, excel_pos):
+            self.write_to_excel(
+                df[col].iloc[0], round_num=1, sheet=self.ws4, rows=pos[0], cols=pos[1], string=f"新增{col}", date=date_str
+            )
+
+        self.wb.save(path or self.file_path)
+        print("完成更新 {} 的 價位".format(stock_id))
+        self.msg_queue.put("完成更新 {} 的 價位".format(stock_id))
