@@ -478,12 +478,7 @@ class SelectStockPage(BaseTemplateFrame):
 class StockAnalysisPage(BaseFrame):
     def __init__(self, master):
         super().__init__(master, StartPage, async_loop)
-        try:
-            self.data_getter = TWStockRetrieveModule(db_path, msg_queue)
-        except Exception as e:
-            print("database is not connected: {}".format(e))
-            master.switch_frame(StartPage)
-
+        self.master = master
         self.prev_id = ""
 
         stock_id_label = Label(self, text="分析股票代號: ", background="pink", font=("TkDefaultFont", 16))
@@ -494,33 +489,42 @@ class StockAnalysisPage(BaseFrame):
 
         back_btn = Button(self, text="Go back", command=lambda: master.switch_frame(StartPage))
         back_btn.grid(row=1, column=0, sticky=W)
-        m_report_btn = Button(self, text="月財報", command=lambda: [self.initial_data(),
-                                                                   self.show_table(self.month_df),
-                                                                   self.create_widget(self.month_fig)])
+        m_report_btn = Button(self, text="月財報", command=lambda: self.activate_jobs(self.month_df, self.month_fig))
+
         m_report_btn.grid(row=1, column=1, sticky=W)
-        s_report_btn = Button(self, text="季財報", command=lambda: [self.initial_data(),
-                                                                   self.show_table(self.season_df),
-                                                                   self.create_widget(self.season_fig, x=0, y=4, xs=5)
-                                                                   ])
+        s_report_btn = Button(self, text="季財報", command=lambda: self.activate_jobs(self.season_df, self.season_fig, x=0, y=4, xs=5))
+
         s_report_btn.grid(row=1, column=2, sticky=W)
-        cash_btn = Button(self, text="現金流", command=lambda: [self.initial_data(),
-                                                               self.show_table(self.cash_df)
-                                                              ])
+        cash_btn = Button(self, text="現金流", command=lambda: self.activate_jobs(self.cash_df))
+
         cash_btn.grid(row=1, column=3, sticky=W)
-        price_btn = Button(self, text="價位分析", command=lambda: [self.initial_data(),
-                                                                        self.show_table(self.est_price),
-                                                                        self.create_widget(self.month_fig)
-                                                                        ])
+        price_btn = Button(self, text="價位分析", command=lambda: self.activate_jobs(self.est_price, self.month_fig))
+
         price_btn.grid(row=1, column=4, sticky=W)
         exit_btn = Button(self, text="Exit", command=self.quit)
         exit_btn.grid(row=1, column=5, sticky=W)
 
-        self.data_table = ttk.Treeview(self, columns=("Tags"), height=15)
+        self.data_table = ttk.Treeview(self, columns="Tags", height=15)
         self.canvas = None
 
-    def initial_data(self):
-        id = self.stock_id_combo.get()
-        if self.prev_id != id:
+        self.month_df, self.month_fig = None, None
+        self.season_df, self.season_fig = None, None
+        self.cash_df = None
+        self.est_price = None
+
+    @call_by_async
+    async def activate_jobs(self, df, fig=None, **kwargs):
+        await self.initial_data(),
+        await self.show_table(df),
+        if fig:
+            await self.create_widget(fig, **kwargs)
+
+    async def initial_data(self):
+        data_getter = TWStockRetrieveModule
+        data_getter.db_path = db_path
+
+        stock_id = self.stock_id_combo.get()
+        if self.prev_id != stock_id:
             # 月財報
             month_setting = {
                 "title": "股價/月營收年增",
@@ -529,25 +533,25 @@ class StockAnalysisPage(BaseFrame):
                 "xlabel": ["日期"],
                 "ylabel": ["價位", "增幅(%)"],
             }
-            self.month_df = self.data_getter.retrieve_month_data(id)
-            fig, setting = self.data_getter.module_data_to_draw(id, month_setting)
+            self.month_df = data_getter.retrieve_month_data(stock_id)
+            fig, setting = data_getter.module_data_to_draw(stock_id, month_setting)
             print(fig, setting)
-            self.month_fig = self.draw_figure(fig, setting)
+            self.month_fig = self.draw_month_figure(fig, setting)
 
             # 季財報
-            self.season_df = self.data_getter.retrieve_season_data(id)
-            self.season_fig = self.draw_figures()
+            self.season_df = data_getter.retrieve_season_data(stock_id)
+            self.season_fig = self.draw_season_figures()
 
             # 現金流
-            self.cash_df = self.data_getter.retrieve_cash_data(id)
+            self.cash_df = data_getter.retrieve_cash_data(stock_id)
 
             # 預估股價
-            self.est_price = self.data_getter.price_estimation(id)
+            self.est_price = data_getter.price_estimation(stock_id)
 
             # 記錄此次分析股票代號
             self.prev_id = self.stock_id_combo.get()
 
-    def create_widget(self, figure, x=7, y=2, xs=1, ys=1, s=W + E + N + S, tool=True):
+    async def create_widget(self, figure, x=7, y=2, xs=1, ys=1, s=W+E+N+S, tool=True):
         self.canvas = FigureCanvasTkAgg(figure, self)
         self.canvas.draw()
         self.canvas.get_tk_widget().grid(row=y, column=x, sticky=s, rowspan=ys, columnspan=xs)
@@ -556,9 +560,9 @@ class StockAnalysisPage(BaseFrame):
         if tool:
             toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
             toolbar.grid(row=y + 1, column=x, sticky=W + E)
-            # self.canvas._tkcanvas.grid(row=y-1, column=x, sticky=s)
+            # cls.canvas._tkcanvas.grid(row=y-1, column=x, sticky=s)
 
-    def draw_figure(self, df, setting):
+    def draw_month_figure(self, df, setting):
         """建立繪圖物件"""
         # 設定中文顯示字型
         mpl.rcParams['font.sans-serif'] = ['Microsoft JhengHei']  # 中文顯示
@@ -611,7 +615,7 @@ class StockAnalysisPage(BaseFrame):
 
         return fig
 
-    def draw_figures(self):
+    def draw_season_figures(self):
         """建立繪圖物件"""
         # 設定中文顯示字型
         mpl.rcParams['font.sans-serif'] = ['Microsoft JhengHei']  # 中文顯示
@@ -638,7 +642,7 @@ class StockAnalysisPage(BaseFrame):
 
         return fig
 
-    def show_table(self, df):
+    async def show_table(self, df):
         def fixed_map(option):
             return [elm for elm in style.map('Treeview', query_opt=option) if
                     elm[:2] != ('!disabled', '!selected')]

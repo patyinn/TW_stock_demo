@@ -328,7 +328,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             target_cols = ['當月營收', '上月比較增減(%)', '去年同月增減(%)']
             mapper, dfs = self.get_bundle_data(target_cols, add_revenue, stock_id)
             mapper, price_dfs = self.get_bundle_data(['收盤價'], add_row_num*40, stock_id)
-            df = TWStockRetrieveModule2.parse_month_df(dfs, price_dfs[0])
+            df = TWStockRetrieveModule.parse_month_df(dfs, price_dfs[0])
             df = df.loc[stock_id]
 
             target_pos = [
@@ -472,7 +472,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             ]
             mapper, dfs = self.get_bundle_data(target_cols, get_data_num, stock_id, assign_table={"折舊費用": "cash_flows"})
             mapper, price_dfs = self.get_bundle_data(["收盤價"], add_column_num*65, stock_id)
-            df = TWStockRetrieveModule2.parse_season_df(dfs, price_dfs[0])
+            df = TWStockRetrieveModule.parse_season_df(dfs, price_dfs[0])
             df = df.loc[stock_id]
             df = df.rename(columns={
                 cols: cols[1]
@@ -617,7 +617,7 @@ class FinancialAnalysis(RetrieveDataModule, CrawlerConnection):
             ]
             mapper, dfs = self.get_bundle_data(target_cols, get_data_num, stock_id)
 
-            df = TWStockRetrieveModule2.parse_cash_df(dfs)
+            df = TWStockRetrieveModule.parse_cash_df(dfs)
             df = df.loc[stock_id]
 
             target_pos = [
@@ -1018,401 +1018,27 @@ class SelectStock(RetrieveDataModule):
             yield s_date, e_date
 
 
-class TWStockRetrieveModule1(RetrieveDataModule):
-    def __init__(self, db_path, msg_queue):
-        conn = sqlite3.connect(db_path)
-        super().__init__(conn, msg_queue)
-
-        self.price = self.get_data('收盤價', 800)
-        self.revenue_month = self.get_data('當月營收', 36)
-        self.mr_month_growth = self.get_data('上月比較增減(%)', 36)
-        self.mr_year_growth = self.get_data('去年同月增減(%)', 48)
-
-        self.revenue_season = self.get_data_assign_table('營業收入合計', 16) * 0.00001  # 單位: 億
-        # 營業利益率，也可以簡稱營益率，英文Operating Margin或Operating profit Margin
-        self.opm_raw = self.get_data_assign_table('營業利益（損失）', 16) * 0.00001  # 單位: 億
-        self.gross_profit = self.get_data_assign_table('營業毛利（毛損）', 16) * 0.00001  # 單位: 億
-        self.equity = self.get_data_assign_table("股本合計", 16) * 0.00001  # 單位: 億
-        self.profit_before_tax = self.get_data_assign_table("繼續營業單位稅前淨利（淨損）",
-                                                            16) * 0.00001  # 單位: 億  本期稅前淨利（淨損）
-        self.profit_after_tax = self.get_data_assign_table("本期淨利（淨損）", 16) * 0.00001  # 單位: 億
-        self.operating_costs = self.get_data_assign_table("營業成本合計", 16) * 0.00001  # 單位: 億
-        self.account_receivable = self.get_data_assign_table("應收帳款淨額", 16) * 0.00001  # 單位: 億
-        self.inventory = self.get_data_assign_table("存貨", 16) * 0.00001  # 單位: 億
-        self.assets = self.get_data_assign_table("資產總計", 16) * 0.00001  # 單位: 億
-        self.liabilities = self.get_data_assign_table("負債總計", 16) * 0.00001  # 單位: 億
-        self.accounts_payable = self.get_data_assign_table("應付帳款", 16) * 0.00001  # 單位: 億
-        self.intangible_assets = self.get_data_assign_table("無形資產", 16) * 0.00001  # 單位: 億
-        self.depreciation = self.get_data_assign_table("折舊費用", 16, table="cash_flows") * 0.00001  # 單位: 億
-        self.net_income = self.get_data_assign_table('本期淨利（淨損）', 16) * 0.00001  # 單位: 億
-        # 修正：因為有些股東權益的名稱叫作「權益總計」有些叫作「權益總額」，所以要先將這兩個dataframe合併起來喔！
-        權益總計 = self.get_data_assign_table('權益總計', 16)
-        權益總額 = self.get_data_assign_table('權益總額', 16)
-        # 把它們合併起來（將「權益總計」為NaN的部分填上「權益總額」）
-        self.Shareholders_equity = 權益總計.fillna(權益總額, inplace=False) * 0.00001  # 單位: 億
-
-        # Cash Flow for investing
-        self.cash_flow_for_investing = self.get_data_assign_table("投資活動之淨現金流入（流出）", 32) * 0.00001  # 單位:億
-        # Operating Cash Flow
-        self.operating_cash_flow = self.get_data_assign_table("營業活動之淨現金流入（流出）", 32) * 0.00001  # 單位:億
-        # Cash Flows Provided from Financing Activities
-        self.cash_flow_for_financing = self.get_data_assign_table("籌資活動之淨現金流入（流出）", 32) * 0.00001  # 單位:億
-        # Cash Balances - Beginning of Period
-        self.cash_balances_beginning = self.get_data_assign_table("期初現金及約當現金餘額", 32) * 0.00001  # 單位:億
-        # Cash Balances - End of Period
-        self.cash_balances_end = self.get_data_assign_table("期末現金及約當現金餘額", 32) * 0.00001  # 單位:億
-
-        self.mapper = {
-            "股價": self.price,
-            "月營收": self.revenue_month,
-            "月營收月增率": self.mr_month_growth,
-            "月營收年增率": self.mr_year_growth,
-            "季營收": self.revenue_season,
-            "營業利益": self.opm_raw,
-            "營業毛利": self.gross_profit,
-            "股本": self.equity,
-            "稅前淨利": self.profit_before_tax,
-            "稅後淨利": self.profit_after_tax,
-            "營業成本": self.operating_costs,
-            "應收帳款": self.account_receivable,
-            "存貨": self.inventory,
-            "總資產": self.assets,
-            "總負債": self.liabilities,
-            "應付帳款": self.accounts_payable,
-            "無形資產": self.intangible_assets,
-            "折舊": self.depreciation,
-            "本期淨利": self.net_income,
-            "股東權益": self.Shareholders_equity,
-        }
-
-    def retrieve_month_data(self, stock_id):
-        # 輸入數字並存在變數中，可以透過該變數(字串)，呼叫特定股票
-        month_revenue = self.revenue_month[stock_id].rename("月營收(百萬)")
-        month_revenue = month_revenue.astype(int).apply(lambda s: round(s / 1000000, 2))
-        price = self.price[stock_id].rename("股價")
-        mr_month_growth = self.mr_month_growth[stock_id]
-        mr_year_growth = self.mr_year_growth[stock_id].rename("月營收年增")
-
-        month_revenue.index = pd.to_datetime(month_revenue.index.strftime("%Y-%m"), format="%Y-%m")
-        price.index = pd.to_datetime(price.index.strftime("%Y-%m"), format="%Y-%m")
-        mr_month_growth.index = pd.to_datetime(mr_month_growth.index.strftime("%Y-%m"), format="%Y-%m")
-        mr_year_growth.index = pd.to_datetime(mr_year_growth.index.strftime("%Y-%m"), format="%Y-%m")
-
-        price.index = pd.to_datetime(price.index.strftime("%Y-%m"), format="%Y-%m")
-        price_df = price.groupby(price.index).aggregate(['min', 'mean', 'max'])
-        price_df = price_df.rename(columns={
-            "min": "最低股價",
-            "mean": "平均股價",
-            "max": "最高股價"
-        })
-
-        mag_3_m = mr_year_growth.rolling(3).mean().reindex(index=mr_year_growth.index).rename("營收年增3個月移動平均")
-        mag_3_m = round(mag_3_m, 2)
-        mag_12_m = mr_year_growth.rolling(12).mean().reindex(index=mr_year_growth.index).rename(
-            "營收年增12個月移動平均")
-        mag_12_m = round(mag_12_m, 2)
-
-        dfs = [month_revenue, mr_year_growth, price_df, mag_3_m, mag_12_m]
-        final = pd.concat(dfs, join="inner", axis=1).sort_index(ascending=False)
-        final.index = final.index.strftime('%b-%y')
-
-        return final.reset_index().rename(columns={"index": "月份"})
-
-    def retrieve_season_data(self, stock_id):
-        '''        輸入數字並存在變數中，可以透過該變數(字串)，呼叫特定股票        '''
-        revenue_season = self.revenue_season[stock_id]
-        opm_raw = self.opm_raw[stock_id]
-        gross_profit = self.gross_profit[stock_id]
-        equity = self.equity[stock_id]
-        price = self.price[stock_id]
-        profit_before_tax = self.profit_before_tax[stock_id]
-        profit_after_tax = self.profit_after_tax[stock_id]
-        operating_costs = self.operating_costs[stock_id]
-        account_receivable = self.account_receivable[stock_id]
-        inventory = self.inventory[stock_id]
-        assets = self.assets[stock_id]
-        liabilities = self.liabilities[stock_id]
-        accounts_payable = self.accounts_payable[stock_id]
-        intangible_assets = self.intangible_assets[stock_id]
-        depreciation = self.depreciation[stock_id]
-        net_income = self.net_income[stock_id]
-        shareholders_equity = self.Shareholders_equity[stock_id]
-
-        '''        拆解數據處理        '''
-        decom_depreciation = self.data_process(depreciation, cum=False)
-        '''        累積數據處理        '''
-        cum_return_on_equity = net_income / shareholders_equity * 100
-        cum_return_on_equity = self.data_process(cum_return_on_equity, cum=True)
-
-        cum_profit_after_tax = self.data_process(profit_after_tax, cum=True)
-        cum_revenue_season = self.data_process(revenue_season, cum=True)
-        cum_profit_after_tax = cum_profit_after_tax / cum_revenue_season * 100
-
-        cum_shareholders_equity = shareholders_equity / assets * 100
-
-        new_assets = []
-        for idx in range(len(assets)):
-            new_assets.append((assets[idx] + assets[idx - 1]) / 2)
-        new_assets = pd.Series(new_assets, index=assets.index)
-        new_assets = new_assets.drop(labels=[assets.index[0]])
-        cum_new_assets = self.data_process(new_assets, cum=True)
-        cum_total_assets_turnover = cum_revenue_season / cum_new_assets * 4
-
-        '''  新增當期營收、當期營收年成長率  '''
-        sr = revenue_season
-        sr_yg = (sr - sr.shift(4)) / sr.shift(4) * 100
-        sr, sr_yg = round(sr, 1).rename("季營收(億)"), round(sr_yg, 1).rename("季營收年增")
-        '''   營業毛利率   '''
-        gp = gross_profit / revenue_season * 100
-        gp = round(gp, 1).rename("營業毛利率")
-        '''   營業利益率、營業利益成長率   '''
-        opm = opm_raw / revenue_season * 100
-        opm_sg = (opm - opm.shift(1)) / opm.shift(1) * 100
-        opm, opm_sg = round(opm, 1).rename("營業利益率"), round(opm_sg, 1).rename("營業利益成長率")
-        '''   新增股本、股本季增率、當期市值與市值營收比   '''
-        eq = equity
-        eq_sg = (eq - equity.shift(1)) / eq.shift(1) * 100
-        price_eq = price.loc[:eq.index[-1]].iloc[-1]  # 確認股本公布當天是否為交易日
-        mv = price_eq * eq / 10  # 市值 = 股價 * 總股數 (股本合計單位為 k元)
-        psr = revenue_season.rolling(4).sum() / mv * 100
-        eq, eq_sg = round(eq, 1).rename("股本"), round(eq_sg, 1).rename("股本季增率")
-        mv, psr = round(mv, 1).rename("當期市值"), round(psr, 1).rename("市值營收比")
-        '''   新增稅前淨利率、本業收入比率、稅後淨利率、稅後淨利年增率  '''
-        pbt = profit_before_tax / revenue_season * 100
-        so_r = opm / pbt
-        pat = profit_after_tax / revenue_season * 100
-        pat_yg = (profit_after_tax - profit_after_tax.shift(4)) / profit_after_tax.shift(4) * 100
-        pbt, so_r = round(pbt, 1).rename("稅前淨利率"), round(so_r, 1).rename("本業收入比率")
-        pat, pat_yg = round(pat, 1).rename("稅後淨利率"), round(pat_yg, 1).rename("稅後淨利年增率")
-        '''   新增EPS、EPS年成長率   '''
-        eps = profit_after_tax / (equity / 10)
-        eps_yg = (eps - eps.shift(4)) / eps.shift(4) * 100
-        eps, eps_yg = round(eps, 1).rename("EPS"), round(eps_yg, 1).rename("EPS年成長率")
-        '''   新增應收帳款週轉率、存貨周轉率、存貨營收比   '''
-        # receivables turnover
-        rt = sr / ((account_receivable + account_receivable.shift(1)) / 2) * 4
-        # inventory turnover
-        it = operating_costs / ((inventory + inventory.shift(1)) / 2) * 4
-        # inventory revenue ratio
-        ir = inventory / sr * 100
-        rt, it = round(rt, 1).rename("應收帳款週轉率"), round(it, 1).rename("存貨周轉率")
-        ir = round(ir, 1).rename("存貨營收比")
-        '''   新增應付帳款總資產占比、負債總資產占比、無形資產占比'''
-        li_a = liabilities / assets * 100
-        ap = accounts_payable / assets * 100
-        int_a = intangible_assets / assets * 100
-        li_a, ap = round(li_a, 1).rename("應付帳款總資產占比"), round(ap, 1).rename("負債總資產占比")
-        int_a = round(int_a, 1).rename("無形資產占比")
-        '''   新增折舊、折舊負擔比率   '''
-        # Debt Asset ratio
-        dep = decom_depreciation
-        dar = dep / sr
-        dep, dar = round(dep, 1).rename("折舊"), round(dar, 1).rename("折舊負擔比率")
-        '''   杜邦分析   '''
-        c_roe = cum_return_on_equity
-        ce_roe = c_roe
-        ce_roe.update(cum_return_on_equity[cum_return_on_equity.index.month == 5] * 4)
-        ce_roe.update(cum_return_on_equity[cum_return_on_equity.index.month == 8] * 2)
-        ce_roe.update(cum_return_on_equity[cum_return_on_equity.index.month == 11] * 4 / 3)
-        c_tat = cum_total_assets_turnover
-        c_pat = cum_profit_after_tax
-        c_se = cum_shareholders_equity
-        # Equity Multiplier
-        c_em = 1 / c_se * 100
-        c_roe, ce_roe = round(c_roe, 1).rename("股東權益報酬率(季)"), round(ce_roe, 1).rename("股東權益報酬率(年預估)")
-        c_pat, c_tat = round(c_pat, 1).rename("稅後淨利率(累計)"), round(c_tat, 1).rename("總資產週轉率(次/年)")
-        c_em, c_se = round(c_em, 1).rename("權益係數"), round(c_se, 1).rename("股東權益總額(%)")
-
-        empty_profit = pd.Series(name='* 獲利能力', index=sr.index)
-        empty_operation = pd.Series(name='* 經營能力', index=sr.index)
-        empty_asset = pd.Series(name='* 資產負債表', index=sr.index)
-        empty_cash = pd.Series(name='* 現金流量表', index=sr.index)
-        empty_du_pont = pd.Series(name='* 杜邦分析(累季)', index=sr.index)
-
-        dfs = [
-            empty_profit, sr, sr_yg, mv, gp, opm, opm_sg, pbt, so_r, pat, pat_yg, eps, eps_yg,
-            empty_operation, rt, it, ir, psr,
-            empty_asset, eq, eq_sg, li_a, ap, int_a,
-            empty_cash, dep, dar,
-            empty_du_pont, c_roe, ce_roe, c_pat, c_tat, c_em, c_se
-        ]
-        final = pd.concat(dfs, join="inner", axis=1).sort_index(ascending=False)
-        final.index = final.index.to_period("Q").strftime('%yQ%q')
-        final = final.transpose()
-
-        return final.reset_index().rename(columns={"index": "項目"})
-
-    def retrieve_cash_data(self, stock_id):
-        '''        輸入數字並存在變數中，可以透過該變數(字串)，呼叫特定股票        '''
-        cash_flow_for_investing = self.cash_flow_for_investing[stock_id]
-        operating_cash_flow = self.operating_cash_flow[stock_id]
-        # Free cash flow(FCF)
-        free_cash_flow = (cash_flow_for_investing + operating_cash_flow)
-        cash_flow_for_financing = self.cash_flow_for_financing[stock_id]
-        cash_balances_beginning = self.cash_balances_beginning[stock_id]
-        cash_balances_end = self.cash_balances_end[stock_id]
-
-        cash_flow_for_investing = self.get_cash_flow(cash_flow_for_investing)
-        operating_cash_flow = self.get_cash_flow(operating_cash_flow)
-        free_cash_flow = self.get_cash_flow(free_cash_flow)
-        cash_flow_for_financing = self.get_cash_flow(cash_flow_for_financing)
-        cash_balances_beginning = self.get_cash_flow(cash_balances_beginning)
-        cash_balances_end = self.get_cash_flow(cash_balances_end)
-
-        '''  新增營業活動現金、理財活動現金、自由現金流量、籌資活動現金'''
-        ocf = round(operating_cash_flow, 1).rename("營業活動現金")
-        icf = round(cash_flow_for_investing, 1).rename("理財活動現金")
-        fcf = round(free_cash_flow, 1).rename("自由現金流量")
-        cfpfa = round(cash_flow_for_financing, 1).rename("籌資活動現金")
-        cbbp = round(cash_balances_beginning, 1).rename("期初現金及約當現金餘額")
-        cbep = round(cash_balances_end, 1).rename("期末現金及約當現金餘額")
-
-        dfs = [ocf, icf, fcf, cfpfa, cbbp, cbep]
-        final = pd.concat(dfs, join="inner", axis=1).sort_index(ascending=False)
-        final.index = final.index.strftime('%Y')
-        final = final.T
-
-        return final.reset_index().rename(columns={"index": "年度"})
-
-    def price_estimation(self, stock_id):
-        revenue_month = self.revenue_month[stock_id].rename("月營收(百萬)")
-        mr_year_growth = self.mr_year_growth[stock_id].rename("月營收年增")
-        revenue_season = self.revenue_season[stock_id]
-        profit_after_tax = self.profit_after_tax[stock_id]
-        pat_for_per = self.profit_after_tax[stock_id].dropna()
-        equity = self.equity[stock_id].dropna()
-        price = self.price[stock_id].dropna()
-        pat = profit_after_tax / revenue_season * 100
-
-        price.index = price.index.to_period("Q")
-        price = price.groupby(price.index).last()
-        eps = (profit_after_tax / (equity / 10)).rolling(4).sum()
-        eps.index = eps.index.to_period("Q")
-        per = price / eps
-        per = pd.concat([per, per.aggregate(['min', 'mean', 'max'])])
-
-        df = pd.DataFrame(dtype=float)
-        df["短期"] = [revenue_month.iloc[:3].sum() * 0.000001, mr_year_growth.iloc[:3].sum(), pat.iloc[:4].mean()]
-        df["中期"] = [revenue_month.iloc[:6].sum() * 0.000001, mr_year_growth.iloc[:6].sum(), pat.iloc[:8].mean()]
-        df["長期"] = [revenue_month.iloc[:12].sum() * 0.000001, mr_year_growth.iloc[:12].sum(), pat.iloc[:12].mean()]
-
-        df = df.rename(index={0: "月營收", 1: "營收年增", 2: "平均稅後淨利"})
-
-        max_mr_yg, min_mr_yg = df.loc["營收年增"].max(), df.loc["營收年增"].min()
-        pat_1st = df["短期"].loc["平均稅後淨利"]
-
-        grest_pat = pd.DataFrame({
-            "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
-            "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
-            "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-        }).T
-        brest_pat = pd.DataFrame({
-            "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-            "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-            "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-        }).T
-
-        est_df = pd.DataFrame({
-            "樂觀推估營收": df.loc["月營收"] * (1 + max_mr_yg / 100),
-            "悲觀推估營收": df.loc["月營收"] * (1 + min_mr_yg / 100),
-        })
-        est_df["樂觀推估稅後淨利"] = est_df["樂觀推估營收"] * pat_1st
-        est_df["悲觀推估稅後淨利"] = est_df["悲觀推估營收"] * pat_1st
-        est_df["樂觀推估eps"] = (est_df["樂觀推估稅後淨利"] + grest_pat[0]) / equity.iloc[-1]
-        est_df["悲觀推估eps"] = (est_df["悲觀推估稅後淨利"] + brest_pat[0]) / equity.iloc[-1]
-        est_df["樂觀推估價位"] = est_df["樂觀推估eps"] * per.loc["mean"]
-        est_df["悲觀推估稅後淨利"] = est_df["悲觀推估eps"] * per.loc["mean"]
-
-        # Empty_profit = pd.Series(table_name='* 獲利能力', index=SR.index)
-
-        dfs = [est_df, per]
-        final = pd.concat(dfs).rename(columns={0: "本益比"}).round(1).T
-
-        return final.reset_index().rename(columns={"index": "項目"})
-
-    def module_data_to_draw(self, stock_id, setting):
-        df_list = []
-        for m in setting.get("main"):
-            df = self.mapper.get(m)
-            df = df[stock_id].rename(f"m*{m}")
-            df.index = pd.to_datetime(df.index.strftime("%Y-%m"), format="%Y-%m")
-            if m == "股價":
-                df = df.groupby(df.index).mean().sort_values()
-            df = round(df, 2)
-            df_list.append(df)
-
-        for s in setting.get("sub", []):
-            ma = re.match(r"([\u4e00-\u9fa5]+)(\d+)\w+移動平均", s)
-            if ma:
-                s1 = ma.group(1)
-                month = int(ma.group(2))
-            else:
-                s1 = s
-                month = None
-            df = self.mapper.get(s1)
-            df = df[stock_id].rename(f"s*{s}")
-            df.index = pd.to_datetime(df.index.strftime("%Y-%m"), format="%Y-%m")
-            if month:
-                df = df.rolling(month).mean().reindex(index=df.index).rename(f"s*{s}")
-            df = round(df, 2)
-            df_list.append(df)
-
-        final = pd.concat(df_list, join="inner", axis=1).sort_index(ascending=False)
-        final.index = final.index.strftime('%b-%y').rename("日期")
-
-        return final, setting
-
-    @staticmethod
-    def get_cash_flow(raw_data):
-        raw_data = raw_data.fillna(0)
-        idx = raw_data.index[-1]
-        # 抓當年度最新一筆資料
-        raw_data_1 = pd.Series(raw_data[-1], index=[idx])
-        # Q4
-        if idx.month == 3:
-            raw_data_year = idx.year - 1
-        else:
-            raw_data_year = idx.year
-
-        # 抓每年的Q4
-        new_data = raw_data[raw_data.index.month == 3]
-        new_data.index = new_data.index.year - 1
-        new_data.index = pd.to_datetime((new_data.index).astype(str))
-
-        if new_data.empty:
-            new_data = raw_data_1
-        elif new_data.index[-1].year != raw_data_year:
-            new_data = pd.concat([new_data, raw_data_1], ignore_index=False)
-
-        return new_data
-
-
 class TWStockRetrieveModule(RetrieveDataModule):
-    cache_price = {}
-    cache_month = {}
-    cache_season = {}
-    cache_cash = {}
+    price = pd.DataFrame()
+    month_df = pd.DataFrame()
+    season_df = pd.DataFrame()
+    estimation_df = pd.DataFrame()
+    mapper = {}
+    db_path = None
 
-    def __init__(self, db_path, msg_queue):
-        self.db_path = db_path
-        self.msg_queue = msg_queue
-        self.price = pd.DataFrame()
-        self.month_df = pd.DataFrame()
-        self.season_df = pd.DataFrame()
-        self.cash_df = pd.DataFrame()
-        self.mapper = {}
-
-        print(self.month_df, self.mapper)
-
-    def retrieve_data_from_db(self, stock_id):
-        conn = sqlite3.connect(self.db_path)
-        retriever = RetrieveDataModule(conn, self.msg_queue)
+    @classmethod
+    def retrieve_data_from_db(cls, stock_id):
+        if not cls.db_path:
+            raise ValueError("assign a db path first.")
+        conn = sqlite3.connect(cls.db_path)
+        retriever = RetrieveDataModule(conn)
 
         mapper, dfs = retriever.get_bundle_data(['收盤價'], 800, stock_id)
-        self.price = dfs[0]
+        cls.price = dfs[0]
 
-        mapper, dfs = retriever.get_bundle_data(['當月營收', '上月比較增減(%)', '去年同月增減(%)'], 36, stock_id)
-        self.month_df = pd.concat([self.month_df, self.parse_month_df(dfs, self.price)])
+        target_cols = ['當月營收', '上月比較增減(%)', '去年同月增減(%)']
+        mapper, dfs = retriever.get_bundle_data(target_cols, 48, stock_id)
+        cls.month_df = pd.concat([cls.month_df, cls.parse_month_df(dfs, cls.price)])
 
         target_cols = [
             '營業收入合計',
@@ -1433,7 +1059,7 @@ class TWStockRetrieveModule(RetrieveDataModule):
             '權益總額',
         ]
         mapper, dfs = retriever.get_bundle_data(target_cols, 16, stock_id, assign_table={"折舊費用": "cash_flows"})
-        self.season_df = pd.concat([self.season_df, self.parse_season_df(dfs, self.price)])
+        cls.season_df = pd.concat([cls.season_df, cls.parse_season_df(dfs, cls.price)])
 
         target_cols = [
             "投資活動之淨現金流入（流出）",
@@ -1443,36 +1069,99 @@ class TWStockRetrieveModule(RetrieveDataModule):
             "期末現金及約當現金餘額"
         ]
         mapper, dfs = retriever.get_bundle_data(target_cols, 36, stock_id)
-        self.cash_df = pd.concat([self.cash_df, self.parse_cash_df(dfs)])
+        cls.cash_df = pd.concat([cls.cash_df, cls.parse_cash_df(dfs)])
+
+        est_month_df = cls.month_df.loc[["月營收(億)", "月營收年增率"]]
+        est_season_df = cls.season_df.loc[[('獲利能力', '每股稅後盈餘'), ('獲利能力', '稅後淨利率'), ('資產負債表', '股本合計')]]
+        est_season_df.index = pd.to_datetime(est_season_df.index, format="%yQ%q").to_period("Q")
+        est_season_df.columns = est_season_df.columns.get_level_values(1)
+        est_price_df = cls.price.copy()
+        cls.estimation_df = pd.concat([cls.estimation_df, cls.parse_price_estimation(est_month_df, est_season_df, est_price_df)])
 
         # 這裡未改，會有問題
-        self.mapper = {
-            "股價": self.price.loc[stock_id, "收盤價"],
-            "月營收": self.month_df.loc[stock_id, "月營收(億)"],
-            "月營收月增率": self.month_df.loc[stock_id, "月營收月增率"],
-            "月營收年增率": self.month_df.loc[stock_id, "月營收年增率"],
+        cls.mapper = {
+            "股價": cls.price["收盤價"],
+            "月營收": cls.month_df["月營收(億)"],
+            "月營收月增率": cls.month_df["月營收月增率"],
+            "月營收年增率": cls.month_df["月營收年增率"],
         }
 
-    def retrieve_month_data(self, stock_id):
-        if stock_id in self.month_df.index.get_level_values("stock_id"):
-            return self.month_df.loc[stock_id]
-        else:
-            self.retrieve_data_from_db(stock_id)
-            return self.month_df.loc[stock_id]
+    @classmethod
+    def parse_price_estimation(cls, month_df, season_df, price_df):
+        price_df = price_df.groupby(['stock_id', pd.Grouper(level='date', freq='S')]).last()
+        season_df["每股稅後盈餘四季總和"] = season_df.groupby("stock_id")["每股稅後盈餘"].rolling(4).sum()
+        season_df["本益比"] = price_df / season_df["每股稅後盈餘四季總和"]
+        per_df = season_df.groupby("stock_id")["本益比"].aggregate(['min', 'mean', 'max'])
 
-    def retrieve_season_data(self, stock_id):
-        if stock_id in self.season_df.index.get_level_values("stock_id"):
-            return self.season_df.loc[stock_id]
-        else:
-            self.retrieve_data_from_db(stock_id)
-            return self.season_df.loc[stock_id]
+        month_df[["短期月營收", "短期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].rolling(3).sum()
+        month_df[["中期月營收", "中期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].rolling(6).sum()
+        month_df[["長期月營收", "長期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].rolling(12).sum()
+        month_df = month_df.groupby("stock_id").last()
 
-    def retrieve_cash_data(self, stock_id):
-        if stock_id in self.cash_df.index.get_level_values("stock_id"):
-            return self.cash_df.loc[stock_id]
-        else:
-            self.retrieve_data_from_db(stock_id)
-            return self.cash_df.loc[stock_id]
+        df = pd.DataFrame(dtype=float)
+        df["短期"] = month_df[["短期月營收", "短期月營收年增"]]
+        df["中期"] = month_df[["中期月營收", "中期月營收年增"]]
+        df["長期"] = month_df[["長期月營收", "長期月營收年增"]]
+
+        df = df.rename(index={0: "月營收", 1: "營收年增"})
+
+        df.concat([df, pd.DataFrame({})])
+        max_mr_yg, min_mr_yg = df.loc["營收年增"].max(), df.loc["營收年增"].min()
+        pat_1st = df["短期"].loc["平均稅後淨利"]
+
+        greatest_pat = pd.DataFrame({
+            "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
+            "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
+            "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
+        }).T
+        wrost_pat = pd.DataFrame({
+            "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
+            "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
+            "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
+        }).T
+
+        est_df = pd.DataFrame({
+            "樂觀推估營收": df.loc["月營收"] * (1 + max_mr_yg / 100),
+            "悲觀推估營收": df.loc["月營收"] * (1 + min_mr_yg / 100),
+        })
+        est_df["樂觀推估稅後淨利"] = est_df["樂觀推估營收"] * pat_1st
+        est_df["悲觀推估稅後淨利"] = est_df["悲觀推估營收"] * pat_1st
+        est_df["樂觀推估eps"] = (est_df["樂觀推估稅後淨利"] + greatest_pat[0]) / equity.iloc[-1]
+        est_df["悲觀推估eps"] = (est_df["悲觀推估稅後淨利"] + wrost_pat[0]) / equity.iloc[-1]
+        est_df["樂觀推估價位"] = est_df["樂觀推估eps"] * per_df.loc["mean"]
+        est_df["悲觀推估稅後淨利"] = est_df["悲觀推估eps"] * per_df.loc["mean"]
+
+        # Empty_profit = pd.Series(table_name='* 獲利能力', index=SR.index)
+
+        dfs = [est_df, per]
+        final = pd.concat(dfs).rename(columns={0: "本益比"}).round(1).T
+
+        return final.reset_index().rename(columns={"index": "項目"})
+
+
+    @classmethod
+    def retrieve_month_data(cls, stock_id):
+        if stock_id not in cls.month_df.index.get_level_values("stock_id"):
+            cls.retrieve_data_from_db(stock_id)
+        return cls.month_df.loc[stock_id]
+
+    @classmethod
+    def retrieve_season_data(cls, stock_id):
+        if stock_id not in cls.season_df.index.get_level_values("stock_id"):
+            cls.retrieve_data_from_db(stock_id)
+        return cls.season_df.loc[stock_id]
+
+    @classmethod
+    def retrieve_cash_data(cls, stock_id):
+        if stock_id not in cls.cash_df.index.get_level_values("stock_id"):
+            cls.retrieve_data_from_db(stock_id)
+        return cls.cash_df.loc[stock_id]
+
+    @classmethod
+    def retrieve_price_estimation(cls, stock_id):
+        if stock_id not in cls.estimation_df.index.get_level_values("stock_id"):
+            cls.retrieve_data_from_db(stock_id)
+        return cls.estimation_df.loc[stock_id]
 
     @classmethod
     def parse_month_df(cls, dfs, price_df):
@@ -1491,8 +1180,8 @@ class TWStockRetrieveModule(RetrieveDataModule):
         price_df.index = price_df.index.map(lambda s: (s[0], s[1].strftime("%b-%y")))
 
         # 計算3個月以及12個月的移動平均數
-        df["3個月移動平均年增率"] = df["去年同月增減(%)"].rolling(3).mean()
-        df["12個月移動平均年增率"] = df["去年同月增減(%)"].rolling(12).mean()
+        df["3個月移動平均年增率"] = df.groupby('stock_id')["去年同月增減(%)"].rolling(3).mean()
+        df["12個月移動平均年增率"] = df.groupby('stock_id')["去年同月增減(%)"].rolling(12).mean()
 
         df = df.reset_index().set_index(["stock_id", "date"])
         df.index = df.index.map(lambda s: (s[0], s[1].strftime("%b-%y")))
@@ -1530,21 +1219,24 @@ class TWStockRetrieveModule(RetrieveDataModule):
         df["總資產週轉率(次/年)"] = df["累積季營收"] / df["累積資產變化"] * 4
 
         '''        處理需要放到excel的資料        '''
-        df["季營收年增率"] = 100 * (df["營業收入合計"] / df["營業收入合計"].shift(4)) - 100
+        df["季營收年增率"] = df.groupby("stock_id")["營業收入合計"].transform(lambda s: 100 * (s / s.shift(4)) - 100)
         df["營業毛利率"] = 100 * (df["營業毛利（毛損）"] / df["營業收入合計"])
         df["營業利益率"] = 100 * (df["營業利益（損失）"] / df["營業收入合計"])
         df["營業利益成長率"] = 100 * (df["營業利益率"] / df["營業利益率"].shift(1)) - 100
-        df["股本季增率"] = 100 * (df["股本合計"] / df["股本合計"].shift(1)) - 100
+        df["股本季增率"] = df.groupby("stock_id")["營業收入合計"].transform(lambda s: 100 * (s / s.shift(1)) - 100)
         df["市值"] = season_report_price * df["股本合計"] / 10  # 市值 = 股價 * 總股數 (股本合計單位為 k元)
-        df["營收市值比"] = df["營業收入合計"].rolling(4).sum() / df["市值"] * 100
+        df["營收市值比"] = df.groupby("stock_id")["營業收入合計"].rolling(4).sum()
+        df["營收市值比"] = df["營收市值比"] / df["市值"] * 100
         df["稅前淨利率"] = 100 * (df["繼續營業單位稅前淨利（淨損）"] / df["營業收入合計"])
         df["本業收入比率"] = 100 * (df["營業利益（損失）"] / df["繼續營業單位稅前淨利（淨損）"])
         df["稅後淨利率"] = 100 * (df["本期淨利（淨損）"] / df["營業收入合計"])
         df["稅後淨利年增率"] = 100 * (df["稅後淨利率"] / df["稅後淨利率"].shift(4)) - 100
         df["每股稅後盈餘"] = df["本期淨利（淨損）"] / (df["股本合計"] / 10)
-        df["每股稅後盈餘年成長率"] = 100 * (df["每股稅後盈餘"] / df["每股稅後盈餘"].shift(4)) - 100
-        df["應收帳款週轉率"] = df["營業收入合計"] / ((df["應收帳款淨額"] + df["應收帳款淨額"].shift(1)) / 2) * 4
-        df["存貨周轉率"] = df["營業成本合計"] / ((df["存貨"] + df["存貨"].shift(1)) / 2) * 4
+        df["每股稅後盈餘年成長率"] = df.groupby("stock_id")["每股稅後盈餘"].transform(lambda s: 100 * (s / s.shift(4)) - 100)
+        df["應收帳款週轉率"] = df.groupby("stock_id")["應收帳款淨額"].transform(lambda s: (s + s.shift(1)) / 2)
+        df["應收帳款週轉率"] = df["營業收入合計"] / df["應收帳款週轉率"] * 4
+        df["存貨"] = df.groupby("stock_id")["存貨"].transform(lambda s: (s + s.shift(1)) / 2)
+        df["存貨周轉率"] = df["營業成本合計"] / df["存貨"] * 4
         df["存貨占營收比"] = 100 * (df["存貨"] / df["營業收入合計"])
         df["折舊負擔比率"] = df["遞減折舊費用"] / df["營業收入合計"]
         df["供應商應付帳款總資產占比"] = 100 * (df["應付帳款"] / df["資產總計"])
@@ -1611,65 +1303,11 @@ class TWStockRetrieveModule(RetrieveDataModule):
             ["理財活動現金", "營業活動現金", "籌資活動現金", "自由現金流量", "期初現金及約當現金餘額", "期末現金及約當現金餘額"]
         ]
 
-    def price_estimation(self, stock_id):
-        revenue_month = self.get_data('當月營收', 36)[stock_id].rename("月營收(百萬)")
-        mr_year_growth = self.get_data('去年同月增減(%)', 48)[stock_id].rename("月營收年增")
-        revenue_season = self.get_data_assign_table('營業收入合計', 16)[stock_id]
-        profit_after_tax = self.get_data_assign_table("本期淨利（淨損）", 16)[stock_id]
-        equity = self.get_data_assign_table("股本合計", 16).dropna()
-        price = self.price.copy()
-        pat = profit_after_tax / revenue_season * 100
-
-        price.index = price.index.to_period("Q")
-        price = price.groupby(price.index).last()
-        eps = (profit_after_tax / (equity / 10)).rolling(4).sum()
-        eps.index = eps.index.to_period("Q")
-        per = price / eps
-        per = per.append(per.aggregate(['min', 'mean', 'max']))
-
-        df = pd.DataFrame(dtype=float)
-        df["短期"] = [revenue_month.iloc[:3].sum() * 0.000001, mr_year_growth.iloc[:3].sum(), pat.iloc[:4].mean()]
-        df["中期"] = [revenue_month.iloc[:6].sum() * 0.000001, mr_year_growth.iloc[:6].sum(), pat.iloc[:8].mean()]
-        df["長期"] = [revenue_month.iloc[:12].sum() * 0.000001, mr_year_growth.iloc[:12].sum(), pat.iloc[:12].mean()]
-
-        df = df.rename(index={0: "月營收", 1: "營收年增", 2: "平均稅後淨利"})
-
-        max_mr_yg, min_mr_yg = df.loc["營收年增"].max(), df.loc["營收年增"].min()
-        pat_1st = df["短期"].loc["平均稅後淨利"]
-
-        grest_pat = pd.DataFrame({
-            "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
-            "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
-            "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-        }).T
-        brest_pat = pd.DataFrame({
-            "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-            "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-            "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-        }).T
-
-        est_df = pd.DataFrame({
-            "樂觀推估營收": df.loc["月營收"] * (1 + max_mr_yg / 100),
-            "悲觀推估營收": df.loc["月營收"] * (1 + min_mr_yg / 100),
-        })
-        est_df["樂觀推估稅後淨利"] = est_df["樂觀推估營收"] * pat_1st
-        est_df["悲觀推估稅後淨利"] = est_df["悲觀推估營收"] * pat_1st
-        est_df["樂觀推估eps"] = (est_df["樂觀推估稅後淨利"] + grest_pat[0]) / equity.iloc[-1]
-        est_df["悲觀推估eps"] = (est_df["悲觀推估稅後淨利"] + brest_pat[0]) / equity.iloc[-1]
-        est_df["樂觀推估價位"] = est_df["樂觀推估eps"] * per.loc["mean"]
-        est_df["悲觀推估稅後淨利"] = est_df["悲觀推估eps"] * per.loc["mean"]
-
-        # Empty_profit = pd.Series(table_name='* 獲利能力', index=SR.index)
-
-        dfs = [est_df, per]
-        final = pd.concat(dfs).rename(columns={0: "本益比"}).round(1).T
-
-        return final.reset_index().rename(columns={"index": "項目"})
-
-    def module_data_to_draw(self, stock_id, setting):
+    @classmethod
+    def module_data_to_draw(cls, stock_id, setting):
         df_list = []
         for m in setting.get("main"):
-            df = self.mapper.get(m)
+            df = cls.mapper.get(m)
             df = df.loc[stock_id].rename(f"m*{m}")
             df.index = pd.to_datetime(df.index.strftime("%Y-%m"), format="%Y-%m")
             if m == "股價":
@@ -1685,7 +1323,7 @@ class TWStockRetrieveModule(RetrieveDataModule):
             else:
                 s1 = s
                 month = None
-            df = self.mapper.get(s1)
+            df = cls.mapper.get(s1)
             df = df.loc[stock_id].rename(f"s*{s}")
             print(df)
             if month:

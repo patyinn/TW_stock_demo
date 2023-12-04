@@ -24,7 +24,7 @@ class BaseFrame(Frame):
         Frame.configure(self, bg='pink')
         self.scroll_txt = scrolledtext.ScrolledText(self, wrap=WORD, height=16, width=40)
         self.start_page = start_page
-        self.msg_flag = True
+        self._msg_flag = True
         self.async_loop = async_loop
 
     def create_common_widgets(self):
