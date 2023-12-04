@@ -148,7 +148,7 @@ class CrawlerProcessor(Crawler):
         self.conn = conn
         self.msg_queue = msg_queue
 
-    async def exec_func(self, table, from_date, to_date, force=False):
+    async def exec_func(self, table, from_date, to_date, force=False, multi_threads=False):
         additional_arg = {}
         if table == "price":
             date = self.date_range(from_date, to_date)
@@ -163,7 +163,10 @@ class CrawlerProcessor(Crawler):
                 "force": force,
                 "base_directory": "",
             }
-        await self.update_table(table, function, date, **additional_arg)
+        if multi_threads:
+            await self.update_table_multi_thread(table, function, date, **additional_arg)
+        else:
+            await self.update_table(table, function, date, **additional_arg)
 
     def date_func(self, table, pattern):
         if table == "finance_statement":
