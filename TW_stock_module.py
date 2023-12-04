@@ -500,57 +500,57 @@ class TWStockRetrieveModule(RetrieveDataModule):
             "月營收年增率": cls.month_df["月營收年增率"],
         }
 
-    # @classmethod
-    # def parse_price_estimation(cls, month_df, season_df, price_df):
-    #     price_df = price_df.groupby(['stock_id', pd.Grouper(level='date', freq='S')]).last()
-    #     season_df["每股稅後盈餘四季總和"] = season_df.groupby("stock_id")["每股稅後盈餘"].rolling(4).sum()
-    #     season_df["本益比"] = price_df / season_df["每股稅後盈餘四季總和"]
-    #     per_df = season_df.groupby("stock_id")["本益比"].aggregate(['min', 'mean', 'max'])
-    #
-    #     month_df[["短期月營收", "短期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].transform(lambda s: s.rolling(3).sum())
-    #     month_df[["中期月營收", "中期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].transform(lambda s: s.rolling(6).sum())
-    #     month_df[["長期月營收", "長期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].transform(lambda s: s.rolling(12).sum())
-    #     month_df = month_df.groupby("stock_id").last()
-    #
-    #     df = pd.DataFrame(dtype=float)
-    #     df["短期"] = month_df[["短期月營收", "短期月營收年增"]]
-    #     df["中期"] = month_df[["中期月營收", "中期月營收年增"]]
-    #     df["長期"] = month_df[["長期月營收", "長期月營收年增"]]
-    #
-    #     df = df.rename(index={0: "月營收", 1: "營收年增"})
-    #
-    #     df.concat([df, pd.DataFrame({})])
-    #     max_mr_yg, min_mr_yg = df.loc["營收年增"].max(), df.loc["營收年增"].min()
-    #     pat_1st = df["短期"].loc["平均稅後淨利"]
-    #
-    #     greatest_pat = pd.DataFrame({
-    #         "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
-    #         "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
-    #         "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-    #     }).T
-    #     wrost_pat = pd.DataFrame({
-    #         "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-    #         "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-    #         "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
-    #     }).T
-    #
-    #     est_df = pd.DataFrame({
-    #         "樂觀推估營收": df.loc["月營收"] * (1 + max_mr_yg / 100),
-    #         "悲觀推估營收": df.loc["月營收"] * (1 + min_mr_yg / 100),
-    #     })
-    #     est_df["樂觀推估稅後淨利"] = est_df["樂觀推估營收"] * pat_1st
-    #     est_df["悲觀推估稅後淨利"] = est_df["悲觀推估營收"] * pat_1st
-    #     est_df["樂觀推估eps"] = (est_df["樂觀推估稅後淨利"] + greatest_pat[0]) / equity.iloc[-1]
-    #     est_df["悲觀推估eps"] = (est_df["悲觀推估稅後淨利"] + wrost_pat[0]) / equity.iloc[-1]
-    #     est_df["樂觀推估價位"] = est_df["樂觀推估eps"] * per_df.loc["mean"]
-    #     est_df["悲觀推估稅後淨利"] = est_df["悲觀推估eps"] * per_df.loc["mean"]
-    #
-    #     # Empty_profit = pd.Series(table_name='* 獲利能力', index=SR.index)
-    #
-    #     dfs = [est_df, per]
-    #     final = pd.concat(dfs).rename(columns={0: "本益比"}).round(1).T
-    #
-    #     return final.reset_index().rename(columns={"index": "項目"})
+    @classmethod
+    def parse_price_estimation(cls, month_df, season_df, price_df):
+        price_df = price_df.groupby(['stock_id', pd.Grouper(level='date', freq='S')]).last()
+        season_df["每股稅後盈餘四季總和"] = season_df.groupby("stock_id")["每股稅後盈餘"].rolling(4).sum()
+        season_df["本益比"] = price_df / season_df["每股稅後盈餘四季總和"]
+        per_df = season_df.groupby("stock_id")["本益比"].aggregate(['min', 'mean', 'max'])
+
+        month_df[["短期月營收", "短期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].transform(lambda s: s.rolling(3).sum())
+        month_df[["中期月營收", "中期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].transform(lambda s: s.rolling(6).sum())
+        month_df[["長期月營收", "長期月營收年增"]] = month_df.groupby("stock_id")[["月營收(億)", "月營收年增率"]].transform(lambda s: s.rolling(12).sum())
+        month_df = month_df.groupby("stock_id").last()
+
+        df = pd.DataFrame(dtype=float)
+        df["短期"] = month_df[["短期月營收", "短期月營收年增"]]
+        df["中期"] = month_df[["中期月營收", "中期月營收年增"]]
+        df["長期"] = month_df[["長期月營收", "長期月營收年增"]]
+
+        df = df.rename(index={0: "月營收", 1: "營收年增"})
+
+        df.concat([df, pd.DataFrame({})])
+        max_mr_yg, min_mr_yg = df.loc["營收年增"].max(), df.loc["營收年增"].min()
+        pat_1st = df["短期"].loc["平均稅後淨利"]
+
+        greatest_pat = pd.DataFrame({
+            "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
+            "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + max_mr_yg / 100)],
+            "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
+        }).T
+        wrost_pat = pd.DataFrame({
+            "短期": [revenue_month.iloc[-3:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
+            "中期": [revenue_month.iloc[-6:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
+            "長期": [revenue_month.iloc[-12:].sum() * 0.000001 * (1 + min_mr_yg / 100)],
+        }).T
+
+        est_df = pd.DataFrame({
+            "樂觀推估營收": df.loc["月營收"] * (1 + max_mr_yg / 100),
+            "悲觀推估營收": df.loc["月營收"] * (1 + min_mr_yg / 100),
+        })
+        est_df["樂觀推估稅後淨利"] = est_df["樂觀推估營收"] * pat_1st
+        est_df["悲觀推估稅後淨利"] = est_df["悲觀推估營收"] * pat_1st
+        est_df["樂觀推估eps"] = (est_df["樂觀推估稅後淨利"] + greatest_pat[0]) / equity.iloc[-1]
+        est_df["悲觀推估eps"] = (est_df["悲觀推估稅後淨利"] + wrost_pat[0]) / equity.iloc[-1]
+        est_df["樂觀推估價位"] = est_df["樂觀推估eps"] * per_df.loc["mean"]
+        est_df["悲觀推估稅後淨利"] = est_df["悲觀推估eps"] * per_df.loc["mean"]
+
+        # Empty_profit = pd.Series(table_name='* 獲利能力', index=SR.index)
+
+        dfs = [est_df, per]
+        final = pd.concat(dfs).rename(columns={0: "本益比"}).round(1).T
+
+        return final.reset_index().rename(columns={"index": "項目"})
 
     @classmethod
     def retrieve_month_data(cls, stock_id):
