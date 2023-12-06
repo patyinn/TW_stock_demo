@@ -489,16 +489,16 @@ class StockAnalysisPage(BaseFrame):
 
         back_btn = Button(self, text="Go back", command=lambda: master.switch_frame(StartPage))
         back_btn.grid(row=1, column=0, sticky=W)
-        m_report_btn = Button(self, text="月財報", command=lambda: self.activate_jobs(self.month_df, self.month_fig))
+        m_report_btn = Button(self, text="月財報", command=lambda: self.activate_jobs("self.month_df", self.month_fig))
 
         m_report_btn.grid(row=1, column=1, sticky=W)
-        s_report_btn = Button(self, text="季財報", command=lambda: self.activate_jobs(self.season_df, self.season_fig, x=0, y=4, xs=5))
+        s_report_btn = Button(self, text="季財報", command=lambda: self.activate_jobs("self.season_df", self.season_fig, x=0, y=4, xs=5))
 
         s_report_btn.grid(row=1, column=2, sticky=W)
-        cash_btn = Button(self, text="現金流", command=lambda: self.activate_jobs(self.cash_df))
+        cash_btn = Button(self, text="現金流", command=lambda: self.activate_jobs("self.cash_df"))
 
         cash_btn.grid(row=1, column=3, sticky=W)
-        price_btn = Button(self, text="價位分析", command=lambda: self.activate_jobs(self.est_price, self.month_fig))
+        price_btn = Button(self, text="價位分析", command=lambda: self.activate_jobs("self.est_price", self.month_fig))
 
         price_btn.grid(row=1, column=4, sticky=W)
         exit_btn = Button(self, text="Exit", command=self.quit)
@@ -513,9 +513,10 @@ class StockAnalysisPage(BaseFrame):
         self.est_price = None
 
     @call_by_async
-    async def activate_jobs(self, df, fig=None, **kwargs):
-        await self.initial_data(),
-        await self.show_table(df),
+    async def activate_jobs(self, df_str, fig=None, **kwargs):
+        await self.initial_data()
+        print(eval(df_str))
+        await self.show_table(eval(df_str))
         if fig:
             await self.create_widget(fig, **kwargs)
 
@@ -534,8 +535,7 @@ class StockAnalysisPage(BaseFrame):
                 "ylabel": ["價位", "增幅(%)"],
             }
             self.month_df = data_getter.retrieve_month_data(stock_id)
-            fig, setting = data_getter.module_data_to_draw(stock_id, month_setting)
-            print(fig, setting)
+            fig, setting = data_getter.handle_data_to_draw(stock_id, month_setting)
             self.month_fig = self.draw_month_figure(fig, setting)
 
             # 季財報
@@ -546,7 +546,7 @@ class StockAnalysisPage(BaseFrame):
             self.cash_df = data_getter.retrieve_cash_data(stock_id)
 
             # 預估股價
-            self.est_price = data_getter.price_estimation(stock_id)
+            self.est_price = data_getter.retrieve_price_estimation(stock_id)
 
             # 記錄此次分析股票代號
             self.prev_id = self.stock_id_combo.get()
@@ -622,9 +622,11 @@ class StockAnalysisPage(BaseFrame):
         mpl.rcParams['axes.unicode_minus'] = False  # 負號顯示
 
         figure = plt.figure(num=8, figsize=(5, 2), dpi=80, facecolor="gold", edgecolor='green', frameon=True)
-        draw_df = self.season_df.set_index("項目").loc[[
-            "營業利益率", "應收帳款週轉率", "存貨周轉率", "存貨營收比",
-            "股東權益報酬率(年預估)", "稅後淨利率(累計)", "總資產週轉率(次/年)", "權益係數"]]
+        draw_df = self.season_df.copy()
+        draw_df.columns = draw_df.columns.get_level_values(1)
+        draw_df = draw_df[[
+            "營業利益率", "應收帳款週轉率", "存貨周轉率", "存貨占營收比",
+            "股東權益報酬率(年預估)", "累積稅後淨利率", "總資產週轉率(次/年)", "權益係數"]]
 
         nrows, ncols = 2, 4
         fig, axes = plt.subplots(nrows=nrows, ncols=ncols)
@@ -647,6 +649,7 @@ class StockAnalysisPage(BaseFrame):
             return [elm for elm in style.map('Treeview', query_opt=option) if
                     elm[:2] != ('!disabled', '!selected')]
 
+        print(df)
         style = ttk.Style()
         style.map('Treeview', foreground=fixed_map('foreground'), background=fixed_map('background'))
 
@@ -664,6 +667,7 @@ class StockAnalysisPage(BaseFrame):
 
         df_col = df.columns.values
         df_row = df.index.values
+        print(df_row, df_col)
         counter = len(df_col)
         self.data_table['columns'] = tuple(df_col)
 
@@ -677,10 +681,11 @@ class StockAnalysisPage(BaseFrame):
         self.data_table.tag_configure('highlight', background='#DD99FF')
         for m in range(len(df_row)):
             value = tuple(df.iloc[m].replace(['NaN', 'nan', np.nan], "").tolist())
-            if value[0][0] == "*":
-                self.data_table.insert(parent='', index='end', text='', values=value, tag='highlight', open=False)
-            else:
-                self.data_table.insert(parent='', index='end', text='', values=value)
+            self.data_table.insert(parent='', index='end', text='', values=value, open=False)
+            # if value[0][0] == "*":
+            #     self.data_table.insert(parent='', index='end', text='', values=value, open=False)
+            # else:
+            #     self.data_table.insert(parent='', index='end', text='', values=value)
 
 
 if __name__ == "__main__":

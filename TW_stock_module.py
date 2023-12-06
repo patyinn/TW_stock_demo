@@ -507,64 +507,6 @@ class TWStockRetrieveModule(RetrieveDataModule):
         }
 
     @classmethod
-    def parse_price_estimation(cls, month_df, season_df, price_df):
-        price_df.index = price_df.index.map(lambda s: (s[0], s[1].to_period('Q').strftime("%YQ%q")))
-        price_df = price_df.groupby(['stock_id', 'date']).last()
-        price_df = price_df[price_df.index.isin(season_df.index)]
-        season_df["每股稅後盈餘四季總和"] = season_df.groupby("stock_id")["每股稅後盈餘"].transform(lambda s: s.rolling(4).sum())
-        season_df["本益比"] = price_df["收盤價"] / season_df["每股稅後盈餘四季總和"]
-        per_df = season_df.groupby("stock_id")["本益比"].aggregate(['min', 'mean', 'max'])
-
-        df = pd.DataFrame(dtype=float, index=(["月營收", "營收年增", "既有營收"]))
-        all_ids = month_df.index.get_level_values("stock_id").tolist()
-        for stock_id in list(set(all_ids)):
-            df[(stock_id, "短期")] = [month_df.iloc[:3]["月營收(億)"].sum(), month_df.iloc[:3]["月營收年增率"].mean(), month_df.iloc[:9]["月營收(億)"].sum()]
-            df[(stock_id, "中期")] = [month_df.iloc[:6]["月營收(億)"].sum(), month_df.iloc[:6]["月營收年增率"].mean(), month_df.iloc[:6]["月營收(億)"].sum()]
-            df[(stock_id, "長期")] = [month_df.iloc[:12]["月營收(億)"].sum(), month_df.iloc[:12]["月營收年增率"].mean(), month_df.iloc[1]["月營收(億)"].sum()]
-
-            avg_4s_pat = season_df.loc[stock_id, "稅後淨利率"].iloc[-4:].mean() / 100
-
-            df = pd.concat(
-                [
-                    df,
-                    (df.loc[["月營收"]] * (1 + df.loc["營收年增"].max() / 100) * avg_4s_pat).rename(index={"月營收": "樂觀推估稅後淨利"}),
-                    (df.loc[["月營收"]] * (1 + df.loc["營收年增"].min() / 100) * avg_4s_pat).rename(index={"月營收": "悲觀推估稅後淨利"}),
-                    (df.loc[["既有營收"]] * avg_4s_pat).rename(index={"既有營收": "既有稅後淨利"}),
-                ],
-            )
-            equity = season_df.loc[stock_id, "股本合計"].iloc[-1]
-            df = pd.concat(
-                [
-                    df,
-                    (df.loc[["樂觀推估稅後淨利", "既有稅後淨利"]].sum()/equity*10).to_frame(name="樂觀推估EPS").T,
-                    (df.loc[["悲觀推估稅後淨利", "既有稅後淨利"]].sum()/equity*10).to_frame(name="悲觀推估EPS").T,
-                ],
-            )
-            df = pd.concat(
-                [
-                    df,
-                    (df.loc[["樂觀推估EPS"]] * per_df.loc[stock_id, "mean"]).rename(index={"樂觀推估EPS": "樂觀推估價位"}),
-                    (df.loc[["樂觀推估EPS"]] * per_df.loc[stock_id, "max"]).rename(index={"樂觀推估EPS": "極端樂觀推估價位"}),
-                    (df.loc[["悲觀推估EPS"]] * per_df.loc[stock_id, "mean"]).rename(index={"悲觀推估EPS": "悲觀推估價位"}),
-                    (df.loc[["悲觀推估EPS"]] * per_df.loc[stock_id, "min"]).rename(index={"悲觀推估EPS": "極端悲觀推估價位"}),
-                ]
-            )
-        df = df.T.round(2)
-        df.index = pd.MultiIndex.from_tuples(df.index)
-
-        est_df = df[
-            [
-                "樂觀推估稅後淨利", "悲觀推估稅後淨利", "樂觀推估EPS", "悲觀推估EPS",
-                "極端樂觀推估價位", "樂觀推估價位", "悲觀推估價位", "極端悲觀推估價位",
-            ]
-        ]
-        pattern = re.compile(r"(\w+觀)(\w+)")
-        est_df.columns = pd.MultiIndex.from_tuples(
-            [(pattern.match(col).group(2), pattern.match(col).group(1)) for col in est_df.columns]
-        )
-        return est_df, season_df["本益比"].dropna()
-
-    @classmethod
     def retrieve_month_data(cls, stock_id):
         if cls.month_df.empty or stock_id not in cls.month_df.index.get_level_values("stock_id"):
             cls.retrieve_data_from_db(stock_id)
@@ -716,7 +658,7 @@ class TWStockRetrieveModule(RetrieveDataModule):
     @classmethod
     def parse_cash_df(cls, dfs):
         df = pd.concat(dfs, axis=1).multiply(0.00001)  # 單位:億
-        df = df.groupby("stock_id").apply(cls.get_cash_flow)
+        df = df.groupby("stock_id").apply(cls._pick_cash_flow)
         df["自由現金流量"] = df["投資活動之淨現金流入（流出）"] + df["營業活動之淨現金流入（流出）"]
         df = df.round(5)
         return df.rename(columns={
@@ -728,17 +670,77 @@ class TWStockRetrieveModule(RetrieveDataModule):
         ]
 
     @classmethod
-    def module_data_to_draw(cls, stock_id, setting):
+    def parse_price_estimation(cls, month_df, season_df, price_df):
+        price_df.index = price_df.index.map(lambda s: (s[0], s[1].to_period('Q').strftime("%YQ%q")))
+        price_df = price_df.groupby(['stock_id', 'date']).last()
+        price_df = price_df[price_df.index.isin(season_df.index)]
+        season_df["每股稅後盈餘四季總和"] = season_df.groupby("stock_id")["每股稅後盈餘"].transform(lambda s: s.rolling(4).sum())
+        season_df["本益比"] = price_df["收盤價"] / season_df["每股稅後盈餘四季總和"]
+        per_df = season_df.groupby("stock_id")["本益比"].aggregate(['min', 'mean', 'max'])
+
+        df = pd.DataFrame(dtype=float, index=(["月營收", "營收年增", "既有營收"]))
+        all_ids = month_df.index.get_level_values("stock_id").tolist()
+        for stock_id in list(set(all_ids)):
+            df[(stock_id, "短期")] = [month_df.iloc[:3]["月營收(億)"].sum(), month_df.iloc[:3]["月營收年增率"].mean(), month_df.iloc[:9]["月營收(億)"].sum()]
+            df[(stock_id, "中期")] = [month_df.iloc[:6]["月營收(億)"].sum(), month_df.iloc[:6]["月營收年增率"].mean(), month_df.iloc[:6]["月營收(億)"].sum()]
+            df[(stock_id, "長期")] = [month_df.iloc[:12]["月營收(億)"].sum(), month_df.iloc[:12]["月營收年增率"].mean(), month_df.iloc[1]["月營收(億)"].sum()]
+
+            avg_4s_pat = season_df.loc[stock_id, "稅後淨利率"].iloc[-4:].mean() / 100
+
+            df = pd.concat(
+                [
+                    df,
+                    (df.loc[["月營收"]] * (1 + df.loc["營收年增"].max() / 100) * avg_4s_pat).rename(index={"月營收": "樂觀推估稅後淨利"}),
+                    (df.loc[["月營收"]] * (1 + df.loc["營收年增"].min() / 100) * avg_4s_pat).rename(index={"月營收": "悲觀推估稅後淨利"}),
+                    (df.loc[["既有營收"]] * avg_4s_pat).rename(index={"既有營收": "既有稅後淨利"}),
+                ],
+            )
+            equity = season_df.loc[stock_id, "股本合計"].iloc[-1]
+            df = pd.concat(
+                [
+                    df,
+                    (df.loc[["樂觀推估稅後淨利", "既有稅後淨利"]].sum()/equity*10).to_frame(name="樂觀推估EPS").T,
+                    (df.loc[["悲觀推估稅後淨利", "既有稅後淨利"]].sum()/equity*10).to_frame(name="悲觀推估EPS").T,
+                ],
+            )
+            df = pd.concat(
+                [
+                    df,
+                    (df.loc[["樂觀推估EPS"]] * per_df.loc[stock_id, "mean"]).rename(index={"樂觀推估EPS": "樂觀推估價位"}),
+                    (df.loc[["樂觀推估EPS"]] * per_df.loc[stock_id, "max"]).rename(index={"樂觀推估EPS": "極端樂觀推估價位"}),
+                    (df.loc[["悲觀推估EPS"]] * per_df.loc[stock_id, "mean"]).rename(index={"悲觀推估EPS": "悲觀推估價位"}),
+                    (df.loc[["悲觀推估EPS"]] * per_df.loc[stock_id, "min"]).rename(index={"悲觀推估EPS": "極端悲觀推估價位"}),
+                ]
+            )
+        df = df.T.round(2)
+        df.index = pd.MultiIndex.from_tuples(df.index, names=['stock_id', '時間長度'])
+
+        est_df = df[
+            [
+                "樂觀推估稅後淨利", "悲觀推估稅後淨利", "樂觀推估EPS", "悲觀推估EPS",
+                "極端樂觀推估價位", "樂觀推估價位", "悲觀推估價位", "極端悲觀推估價位",
+            ]
+        ]
+        pattern = re.compile(r"(\w+觀)(\w+)")
+        est_df.columns = pd.MultiIndex.from_tuples(
+            [(pattern.match(col).group(2), pattern.match(col).group(1)) for col in est_df.columns]
+        )
+        return est_df, season_df["本益比"].dropna()
+
+    @classmethod
+    def handle_data_to_draw(cls, stock_id, setting):
+        if not cls.mapper or stock_id not in cls.month_df.index.get_level_values("stock_id"):
+            cls.retrieve_data_from_db(stock_id)
+
         df_list = []
         for m in setting.get("main"):
             df = cls.mapper.get(m)
             df = df.loc[stock_id].rename(f"m*{m}")
-            df.index = pd.to_datetime(df.index.strftime("%Y-%m"), format="%Y-%m")
+            df.index = df.index.strftime("%b-%y")
             if m == "股價":
                 df = df.groupby(df.index).mean().sort_values()
             df = df.round(2)
             df_list.append(df)
-
         for s in setting.get("sub", []):
             ma = re.match(r"([\u4e00-\u9fa5]+)(\d+)\w+移動平均", s)
             if ma:
@@ -749,7 +751,6 @@ class TWStockRetrieveModule(RetrieveDataModule):
                 month = None
             df = cls.mapper.get(s1)
             df = df.loc[stock_id].rename(f"s*{s}")
-            print(df)
             if month:
                 df = df.rolling(month).mean().reindex(index=df.index).rename(f"s*{s}")
             df = df.round(2)
@@ -757,11 +758,10 @@ class TWStockRetrieveModule(RetrieveDataModule):
 
         final = pd.concat(df_list, join="inner", axis=1).sort_index(ascending=False)
         final.index = final.index.rename("日期")
-
         return final, setting
 
     @staticmethod
-    def get_cash_flow(raw_data):
+    def _pick_cash_flow(raw_data):
         date_idx = raw_data.index.get_level_values(1)
         q4_data = raw_data[date_idx.month == 3]
         df_data = pd.concat([q4_data, raw_data.iloc[-1:]]).drop_duplicates()
@@ -907,7 +907,7 @@ class FinancialAnalysis(TWStockRetrieveModule, CrawlerConnection):
             print(msg)
 
     @staticmethod
-    def get_cash_flow(raw_data):
+    def _pick_cash_flow(raw_data):
         # 抓每年的Q4與最後一筆
         q4_data = raw_data[raw_data.index.month == 3]
         df_data = pd.concat([q4_data, raw_data.iloc[-1:]]).drop_duplicates()
