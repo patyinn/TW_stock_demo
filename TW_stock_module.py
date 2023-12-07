@@ -670,13 +670,18 @@ class TWStockRetrieveModule(RetrieveDataModule):
         ]
 
     @classmethod
-    def parse_price_estimation(cls, month_df, season_df, price_df):
+    def parse_per_df(cls, season_df, price_df):
         price_df.index = price_df.index.map(lambda s: (s[0], s[1].to_period('Q').strftime("%YQ%q")))
         price_df = price_df.groupby(['stock_id', 'date']).last()
         price_df = price_df[price_df.index.isin(season_df.index)]
-        season_df["每股稅後盈餘四季總和"] = season_df.groupby("stock_id")["每股稅後盈餘"].transform(lambda s: s.rolling(4).sum())
-        season_df["本益比"] = price_df["收盤價"] / season_df["每股稅後盈餘四季總和"]
-        per_df = season_df.groupby("stock_id")["本益比"].aggregate(['min', 'mean', 'max'])
+        season_df["每股稅後盈餘四季總和"] = season_df.groupby("stock_id")["每股稅後盈餘"].transform(
+            lambda s: s.rolling(4).sum())
+        per_df = (price_df["收盤價"] / season_df["每股稅後盈餘四季總和"]).to_frame("本益比").dropna()
+        return per_df, per_df.groupby("stock_id")["本益比"].aggregate(['min', 'mean', 'max'])
+
+    @classmethod
+    def parse_price_estimation(cls, month_df, season_df, price_df):
+        per_df, agg_per_df = cls.parse_per_df(season_df, price_df)
 
         df = pd.DataFrame(dtype=float, index=(["月營收", "營收年增", "既有營收"]))
         all_ids = month_df.index.get_level_values("stock_id").tolist()
@@ -696,22 +701,26 @@ class TWStockRetrieveModule(RetrieveDataModule):
                 ],
             )
             equity = season_df.loc[stock_id, "股本合計"].iloc[-1]
-            df = pd.concat(
-                [
-                    df,
-                    (df.loc[["樂觀推估稅後淨利", "既有稅後淨利"]].sum()/equity*10).to_frame(name="樂觀推估EPS").T,
-                    (df.loc[["悲觀推估稅後淨利", "既有稅後淨利"]].sum()/equity*10).to_frame(name="悲觀推估EPS").T,
-                ],
-            )
-            df = pd.concat(
-                [
-                    df,
-                    (df.loc[["樂觀推估EPS"]] * per_df.loc[stock_id, "mean"]).rename(index={"樂觀推估EPS": "樂觀推估價位"}),
-                    (df.loc[["樂觀推估EPS"]] * per_df.loc[stock_id, "max"]).rename(index={"樂觀推估EPS": "極端樂觀推估價位"}),
-                    (df.loc[["悲觀推估EPS"]] * per_df.loc[stock_id, "mean"]).rename(index={"悲觀推估EPS": "悲觀推估價位"}),
-                    (df.loc[["悲觀推估EPS"]] * per_df.loc[stock_id, "min"]).rename(index={"悲觀推估EPS": "極端悲觀推估價位"}),
-                ]
-            )
+
+            optimistic_eps = df.loc[["樂觀推估稅後淨利", "既有稅後淨利"]].sum() / equity * 10
+            pessimistic_eps = df.loc[["悲觀推估稅後淨利", "既有稅後淨利"]].sum() / equity * 10
+
+            df = pd.concat([
+                df,
+                optimistic_eps.to_frame(name="樂觀推估EPS").T,
+                pessimistic_eps.to_frame(name="悲觀推估EPS").T,
+            ])
+
+            price_df = pd.DataFrame({
+                "樂觀推估價位": optimistic_eps * agg_per_df.loc[stock_id, "mean"],
+                "極端樂觀推估價位": optimistic_eps * agg_per_df.loc[stock_id, "max"],
+                "悲觀推估價位": pessimistic_eps * agg_per_df.loc[stock_id, "mean"],
+                "極端悲觀推估價位": pessimistic_eps * agg_per_df.loc[stock_id, "min"],
+            }).rename(index={"樂觀推估價位": "樂觀推估價位", "極端樂觀推估價位": "極端樂觀推估價位",
+                             "悲觀推估價位": "悲觀推估價位", "極端悲觀推估價位": "極端悲觀推估價位"})
+
+            df = pd.concat([df, price_df.T])
+
         df = df.T.round(2)
         df.index = pd.MultiIndex.from_tuples(df.index, names=['stock_id', '時間長度'])
 
@@ -725,7 +734,7 @@ class TWStockRetrieveModule(RetrieveDataModule):
         est_df.columns = pd.MultiIndex.from_tuples(
             [(pattern.match(col).group(2), pattern.match(col).group(1)) for col in est_df.columns]
         )
-        return est_df, season_df["本益比"].dropna()
+        return est_df, per_df
 
     @classmethod
     def handle_data_to_draw(cls, stock_id, setting):
@@ -1289,28 +1298,18 @@ class FinancialAnalysis(TWStockRetrieveModule, CrawlerConnection):
         # 根據需要跟新以及新增的數量，去從sqlite3抓取相對應的數據量
         total_num = update_row_num + add_row_num
         get_data_num = total_num + 4
-        equity = self.get_data_assign_table("股本合計", get_data_num) * 0.00001  # 單位: 億
-        profit_after_tax = self.get_data_assign_table("本期淨利（淨損）", get_data_num) * 0.00001  # 單位: 億
 
-        price_num = total_num * 100
-        price_df = self.get_data_assign_table("收盤價", price_num)
-        equity = equity[stock_id].dropna()
-        profit_after_tax = profit_after_tax[stock_id].dropna()
-        price_df = price_df[stock_id].dropna()
-        price_df.index = price_df.index.to_period("Q")
-        price_df = price_df.groupby([price_df.index]).last()
-
-        eps = profit_after_tax / (equity / 10)
-        estimated_eps = eps.rolling(4).sum()
+        mapper, dfs = self.get_bundle_data(["股本合計", "本期淨利（淨損）"], get_data_num, stock_id)
+        season_df = pd.concat(dfs, axis=1)
+        season_df["每股稅後盈餘"] = season_df["本期淨利（淨損）"] / (season_df["股本合計"] / 10)
+        mapper, price_dfs = self.get_bundle_data(['收盤價'], total_num * 100, stock_id)
+        per_df, agg_per_df = self.parse_per_df(season_df, price_dfs[0])
+        per_df = per_df.loc[stock_id]
 
         '''  檢查公布財報的EPS時間與實際時間的差別，如果尚未公布財報則填入現在的時間，新增最新時間資料  '''
-        fr_date = self.season_transform(estimated_eps.index[-1])
+        fr_date = per_df.index[-1]
         num = 4 * (int(season_now[0:4]) - int(fr_date[0:4])) + (int(season_now[-1]) - int(fr_date[-1]))
-        for n in range(num):
-            date = self.delta_seasons(estimated_eps.index[-1], -1)
-            estimated_eps[date] = estimated_eps[-1]
-
-        estimated_eps.index = self.season_transform(estimated_eps.index, spec=True)
+        per_df = per_df.iloc[-1*num:]
 
         # 新增PER資料
         for add_row in range(-1*total_num, 0, 1):
@@ -1318,28 +1317,14 @@ class FinancialAnalysis(TWStockRetrieveModule, CrawlerConnection):
             if row == 16:
                 self.ws4.insert_rows(16, amount=1)
 
-            update_season_date = estimated_eps.index[add_row]
+            update_season = per_df.iloc[add_row].index
 
             '''  新增季度標籤  '''
-            update_season = self.season_transform(update_season_date)
-            self.write_to_excel(update_season, sheet=self.ws4, rows=row, cols=1, string="PER季度標籤",
-                                date=f"{update_season}")
-            self.ws4.cell(row=row, column=1).fill = PatternFill(fill_type="solid", fgColor="DDDDDD")
-
+            self.write_to_excel(
+                update_season, sheet=self.ws4, rows=row, cols=1, string="PER季度標籤", date=f"{update_season}"
+            )
             '''  新增本益比  '''
-            try:
-                price = price_df.loc[update_season]
-            except Exception as e:
-                print(f"有問題發生，請檢查{e}")
-                self.msg_queue.put(f"有問題發生，請檢查{e}")
-                price = 0.0
-
-            e_eps = estimated_eps.loc[update_season]
-            per = price / e_eps
-
-            print(f"使用季度: {update_season} 所得到的EPS: {round(e_eps, 2)}")
-            self.msg_queue.put(f"使用季度: {update_season} 所得到的EPS: {round(e_eps, 2)}")
-            self.write_to_excel(per, round_num=2, sheet=self.ws4, rows=row, cols=2, string="新增PER", date=update_season)
+            self.write_to_excel(per_df.loc[update_season, "本益比"], round_num=2, sheet=self.ws4, rows=row, cols=2, string="新增PER", date=update_season)
 
         self.wb.save(path or self.file_path)
         print("完成更新 {} 的 本益比".format(stock_id))

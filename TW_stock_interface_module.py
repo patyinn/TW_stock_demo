@@ -498,7 +498,7 @@ class StockAnalysisPage(BaseFrame):
         cash_btn = Button(self, text="現金流", command=lambda: self.activate_jobs("self.cash_df"))
 
         cash_btn.grid(row=1, column=3, sticky=W)
-        price_btn = Button(self, text="價位分析", command=lambda: self.activate_jobs("self.est_price", self.month_fig))
+        price_btn = Button(self, text="價位分析", command=lambda: self.activate_jobs("self.est_price_df", self.month_fig))
 
         price_btn.grid(row=1, column=4, sticky=W)
         exit_btn = Button(self, text="Exit", command=self.quit)
@@ -510,12 +510,11 @@ class StockAnalysisPage(BaseFrame):
         self.month_df, self.month_fig = None, None
         self.season_df, self.season_fig = None, None
         self.cash_df = None
-        self.est_price = None
+        self.est_price_df = None
 
     @call_by_async
     async def activate_jobs(self, df_str, fig=None, **kwargs):
         await self.initial_data()
-        print(eval(df_str))
         await self.show_table(eval(df_str))
         if fig:
             await self.create_widget(fig, **kwargs)
@@ -536,17 +535,17 @@ class StockAnalysisPage(BaseFrame):
             }
             self.month_df = data_getter.retrieve_month_data(stock_id)
             fig, setting = data_getter.handle_data_to_draw(stock_id, month_setting)
-            self.month_fig = self.draw_month_figure(fig, setting)
+            self.month_fig = self.draw_month_ana_figure(fig, setting)
 
             # 季財報
             self.season_df = data_getter.retrieve_season_data(stock_id)
-            self.season_fig = self.draw_season_figures()
+            self.season_fig = self.draw_season_ana_figures()
 
             # 現金流
             self.cash_df = data_getter.retrieve_cash_data(stock_id)
 
             # 預估股價
-            self.est_price = data_getter.retrieve_price_estimation(stock_id)
+            self.est_price_df = data_getter.retrieve_price_estimation(stock_id)
 
             # 記錄此次分析股票代號
             self.prev_id = self.stock_id_combo.get()
@@ -562,7 +561,7 @@ class StockAnalysisPage(BaseFrame):
             toolbar.grid(row=y + 1, column=x, sticky=W + E)
             # cls.canvas._tkcanvas.grid(row=y-1, column=x, sticky=s)
 
-    def draw_month_figure(self, df, setting):
+    def draw_month_ana_figure(self, df, setting):
         """建立繪圖物件"""
         # 設定中文顯示字型
         mpl.rcParams['font.sans-serif'] = ['Microsoft JhengHei']  # 中文顯示
@@ -615,7 +614,7 @@ class StockAnalysisPage(BaseFrame):
 
         return fig
 
-    def draw_season_figures(self):
+    def draw_season_ana_figures(self):
         """建立繪圖物件"""
         # 設定中文顯示字型
         mpl.rcParams['font.sans-serif'] = ['Microsoft JhengHei']  # 中文顯示
@@ -650,6 +649,7 @@ class StockAnalysisPage(BaseFrame):
                     elm[:2] != ('!disabled', '!selected')]
 
         print(df)
+        # curr_size = self.grid_size()
         style = ttk.Style()
         style.map('Treeview', foreground=fixed_map('foreground'), background=fixed_map('background'))
 
