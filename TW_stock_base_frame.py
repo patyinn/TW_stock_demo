@@ -124,6 +124,7 @@ class BaseScrapperFrame(BaseFrame):
         self.create_crawler_widgets()
         self.create_common_widgets()
         self.update_func()
+        self.msg_flag = True
 
     def create_crawler_widgets(self):
         # 選擇要爬取的資料型態
@@ -157,6 +158,10 @@ class BaseScrapperFrame(BaseFrame):
         to_date = self.to_date_combo.get()
         to_date = str(to_date.replace(" ", "-"))
         to_date = datetime.strptime(to_date, '%Y-%m-%d')
+
+        if to_date < from_date:
+            msg_queue.put("日期錯誤")
+            print("日期錯誤")
 
         cmd = (from_date, to_date)
 
@@ -196,6 +201,7 @@ class BaseTemplateFrame(BaseFrame):
         self.path_combo = ttk.Combobox(self, width=70, textvariable=self.path_text,
                                        postcommand=lambda: self.path_combo.configure(
                                            values=self.sys_processor.get_latest_path_sql("directory")))
+        self.msg_flag = True
 
     def create_template_widget(self):
         # 設置選取樣板的資料夾及檔案按鈕，並取得路徑

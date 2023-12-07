@@ -173,7 +173,11 @@ class CrawlerProcessor(Crawler):
             table = "balance_sheet"
         if pattern == "from":
             latest_date = self.table_latest_date(table)
-            date_list = latest_date + datetime.timedelta(days=1)
+            date_list = latest_date
+            if latest_date.date() < datetime.datetime.now().date() - datetime.timedelta(days=1):
+                date_list += datetime.timedelta(days=1)
+            elif latest_date.date() == datetime.datetime.now().date():
+                date_list -= datetime.timedelta(days=1)
             date_list = date_list.strftime('%Y-%m-%d')
         else:
             date_list = datetime.datetime.now().strftime('%Y-%m-%d')
@@ -894,16 +898,6 @@ class FinancialAnalysis(TWStockRetrieveModule, CrawlerConnection):
             sheet.cell(row=rows, column=cols).font = Font(color='000000')  # 黑色
             sheet.cell(row=rows, column=1).fill = PatternFill(fill_type="solid", fgColor="FFFFFF")  # 白色
 
-    @staticmethod
-    def _estimate_roe(c_roe):
-        if c_roe.name.month == 5:
-            return c_roe * 4
-        elif c_roe.name.month == 8:
-            return c_roe * 2
-        elif c_roe.name.month == 11:
-            return c_roe * 4 / 3
-        return c_roe
-
     def write_to_excel(self, data, round_num=None, sheet=None, rows=None, cols=None, string="", date=None):
         if round_num:
             data = round(data, round_num)
@@ -914,14 +908,6 @@ class FinancialAnalysis(TWStockRetrieveModule, CrawlerConnection):
             msg = f"新增{date}的{string}: {data}"
             self.msg_queue.put(msg)
             print(msg)
-
-    @staticmethod
-    def _pick_cash_flow(raw_data):
-        # 抓每年的Q4與最後一筆
-        q4_data = raw_data[raw_data.index.month == 3]
-        df_data = pd.concat([q4_data, raw_data.iloc[-1:]]).drop_duplicates()
-        df_data.index = [datetime.datetime(idx.year - 1, idx.month, 1) if idx.month == 3 else idx for idx in df_data.index]
-        return df_data
 
     async def update_monthly_report(self, stock_id, path=None):
         '''    從資料庫獲取月營收最新日期    '''
@@ -1059,6 +1045,7 @@ class FinancialAnalysis(TWStockRetrieveModule, CrawlerConnection):
         latest_date = revenue_season.dropna().index[-1]
         latest_date_str = self.season_determination(latest_date)
         table_month = self.ws1["E1"].value
+
         add_column_num = 4 * (int(latest_date_str[0:4]) - int(table_month[0:4])) + (
                 int(latest_date_str[-1]) - int(table_month[-1]))
 
@@ -1149,7 +1136,6 @@ class FinancialAnalysis(TWStockRetrieveModule, CrawlerConnection):
             ]
 
             add_column_num *= -1
-            print(df)
             for add_row in range(add_column_num, 0, 1):
                 self.ws1.insert_cols(5, amount=1)
                 update_season = df["當季營收"].index[add_row]
@@ -1302,14 +1288,13 @@ class FinancialAnalysis(TWStockRetrieveModule, CrawlerConnection):
         mapper, dfs = self.get_bundle_data(["股本合計", "本期淨利（淨損）"], get_data_num, stock_id)
         season_df = pd.concat(dfs, axis=1)
         season_df["每股稅後盈餘"] = season_df["本期淨利（淨損）"] / (season_df["股本合計"] / 10)
-        mapper, price_dfs = self.get_bundle_data(['收盤價'], total_num * 100, stock_id)
+        season_df.index = season_df.index.map(lambda s: (s[0], self.season_determination(s[1])))
+        mapper, price_dfs = self.get_bundle_data(['收盤價'], get_data_num * 65, stock_id)
         per_df, agg_per_df = self.parse_per_df(season_df, price_dfs[0])
         per_df = per_df.loc[stock_id]
 
         '''  檢查公布財報的EPS時間與實際時間的差別，如果尚未公布財報則填入現在的時間，新增最新時間資料  '''
-        fr_date = per_df.index[-1]
-        num = 4 * (int(season_now[0:4]) - int(fr_date[0:4])) + (int(season_now[-1]) - int(fr_date[-1]))
-        per_df = per_df.iloc[-1*num:]
+        per_df = per_df.iloc[-1*total_num:]
 
         # 新增PER資料
         for add_row in range(-1*total_num, 0, 1):
@@ -1317,8 +1302,7 @@ class FinancialAnalysis(TWStockRetrieveModule, CrawlerConnection):
             if row == 16:
                 self.ws4.insert_rows(16, amount=1)
 
-            update_season = per_df.iloc[add_row].index
-
+            update_season = per_df.iloc[add_row].name
             '''  新增季度標籤  '''
             self.write_to_excel(
                 update_season, sheet=self.ws4, rows=row, cols=1, string="PER季度標籤", date=f"{update_season}"
