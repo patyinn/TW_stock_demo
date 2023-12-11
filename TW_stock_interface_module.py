@@ -131,6 +131,7 @@ class FinancialReportAnalysisPage(BaseTemplateFrame):
                                          postcommand=self.update_func)
         self.exec_combo = ttk.Combobox(self,
                                        values=["all", "更新月報", "更新季報", "更新PER與今日價位", "更新股東占比"])
+        self.exec_combo.set("all")
 
         self.create_template_widget()
         self.create_updator_widgets()
@@ -489,22 +490,21 @@ class StockAnalysisPage(BaseFrame):
 
         back_btn = Button(self, text="Go back", command=lambda: master.switch_frame(StartPage))
         back_btn.grid(row=1, column=0, sticky=W)
-        m_report_btn = Button(self, text="月財報", command=lambda: self.activate_jobs("self.month_df", self.month_fig))
 
+        m_report_btn = Button(self, text="月財報", command=lambda: [self.activate_jobs("self.month_fig"), self.show_table("self.month_df")])
         m_report_btn.grid(row=1, column=1, sticky=W)
-        s_report_btn = Button(self, text="季財報", command=lambda: self.activate_jobs("self.season_df", self.season_fig, x=0, y=4, xs=5))
-
+        s_report_btn = Button(self, text="季財報", command=lambda: [self.activate_jobs(self.season_fig, x=0, y=4, xs=5), self.show_table("self.season_df")])
         s_report_btn.grid(row=1, column=2, sticky=W)
-        cash_btn = Button(self, text="現金流", command=lambda: self.activate_jobs("self.cash_df"))
-
+        cash_btn = Button(self, text="現金流", command=lambda: [self.activate_jobs("self.cash_df"), self.show_table("self.cash_df")])
         cash_btn.grid(row=1, column=3, sticky=W)
-        price_btn = Button(self, text="價位分析", command=lambda: self.activate_jobs("self.est_price_df", self.month_fig))
-
+        price_btn = Button(self, text="價位分析", command=lambda: [self.activate_jobs("self.est_price_df", self.month_fig), self.show_table("self.est_price_df")])
         price_btn.grid(row=1, column=4, sticky=W)
+
         exit_btn = Button(self, text="Exit", command=self.quit)
         exit_btn.grid(row=1, column=5, sticky=W)
 
-        self.data_table = ttk.Treeview(self, columns="Tags", height=15)
+        self.data_table = None
+        self.prepared = False
         self.canvas = None
 
         self.month_df, self.month_fig = None, None
@@ -515,9 +515,9 @@ class StockAnalysisPage(BaseFrame):
     @call_by_async
     async def activate_jobs(self, df_str, fig=None, **kwargs):
         await self.initial_data()
-        await self.show_table(eval(df_str))
         if fig:
-            await self.create_widget(fig, **kwargs)
+            await self.create_widget(eval(fig), **kwargs)
+        self.prepared = True
 
     async def initial_data(self):
         data_getter = TWStockRetrieveModule
@@ -560,6 +560,28 @@ class StockAnalysisPage(BaseFrame):
             toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
             toolbar.grid(row=y + 1, column=x, sticky=W + E)
             # cls.canvas._tkcanvas.grid(row=y-1, column=x, sticky=s)
+
+    def _create_table(self):
+        def fixed_map(option):
+            return [elm for elm in style.map('Treeview', query_opt=option) if
+                    elm[:2] != ('!disabled', '!selected')]
+
+        table = ttk.Treeview(self, height=15)
+        style = ttk.Style()
+        style.map('Treeview', foreground=fixed_map('foreground'), background=fixed_map('background'))
+
+        table.grid(row=2, column=0, columnspan=6)
+
+        vsb = ttk.Scrollbar(self, orient="vertical", command=table.yview)
+        vsb.grid(column=7, row=2, rowspan=2, sticky=N + S)
+        hsb = ttk.Scrollbar(self, orient="horizontal", command=table.xview)
+        hsb.grid(column=0, row=3, columnspan=6, sticky=W + E)
+        table.configure(yscrollcommand=vsb.set)
+        table.configure(xscrollcommand=hsb.set)
+
+        table.column("#0", width=0, stretch=NO)
+        table.heading("#0", text="", anchor=CENTER)
+        return table
 
     def draw_month_ana_figure(self, df, setting):
         """建立繪圖物件"""
@@ -643,31 +665,31 @@ class StockAnalysisPage(BaseFrame):
 
         return fig
 
-    async def show_table(self, df):
+    def _show_table(self, df):
         def fixed_map(option):
             return [elm for elm in style.map('Treeview', query_opt=option) if
                     elm[:2] != ('!disabled', '!selected')]
 
-        print(df)
-        # curr_size = self.grid_size()
+        self.data_table = ttk.Treeview(self, height=15)
         style = ttk.Style()
         style.map('Treeview', foreground=fixed_map('foreground'), background=fixed_map('background'))
 
-        self.data_table.grid(row=2, column=0, columnspan=5, sticky=W + E)
+        self.data_table.grid(row=2, column=0, columnspan=6)
 
         vsb = ttk.Scrollbar(self, orient="vertical", command=self.data_table.yview)
-        vsb.grid(column=6, row=2, rowspan=2, sticky=N + S)
+        vsb.grid(column=7, row=2, rowspan=2, sticky=N + S)
         hsb = ttk.Scrollbar(self, orient="horizontal", command=self.data_table.xview)
-        hsb.grid(column=0, row=3, columnspan=5, sticky=W + E)
+        hsb.grid(column=0, row=3, columnspan=6, sticky=W + E)
         self.data_table.configure(yscrollcommand=vsb.set)
         self.data_table.configure(xscrollcommand=hsb.set)
 
         self.data_table.column("#0", width=0, stretch=NO)
         self.data_table.heading("#0", text="", anchor=CENTER)
 
+        df = df.copy()
+        df.reset_index(inplace=True)
         df_col = df.columns.values
         df_row = df.index.values
-        print(df_row, df_col)
         counter = len(df_col)
         self.data_table['columns'] = tuple(df_col)
 
@@ -682,10 +704,64 @@ class StockAnalysisPage(BaseFrame):
         for m in range(len(df_row)):
             value = tuple(df.iloc[m].replace(['NaN', 'nan', np.nan], "").tolist())
             self.data_table.insert(parent='', index='end', text='', values=value, open=False)
-            # if value[0][0] == "*":
-            #     self.data_table.insert(parent='', index='end', text='', values=value, open=False)
-            # else:
-            #     self.data_table.insert(parent='', index='end', text='', values=value)
+
+        self.prepared = False
+
+    def show_table(self, df_str):
+        def fixed_map(option):
+            return [elm for elm in style.map('Treeview', query_opt=option) if
+                    elm[:2] != ('!disabled', '!selected')]
+        if self.prepared:
+            df = eval(df_str).copy()
+            self.data_table = ttk.Treeview(self, height=15)
+            style = ttk.Style()
+            style.map('Treeview', foreground=fixed_map('foreground'), background=fixed_map('background'))
+
+            self.data_table.grid(row=2, column=0, columnspan=6)
+
+            vsb = ttk.Scrollbar(self, orient="vertical", command=self.data_table.yview)
+            vsb.grid(column=6, row=2, rowspan=2, sticky=N + S)
+            hsb = ttk.Scrollbar(self, orient="horizontal", command=self.data_table.xview)
+            hsb.grid(column=0, row=3, columnspan=6, sticky=W + E)
+            self.data_table.configure(yscrollcommand=vsb.set)
+            self.data_table.configure(xscrollcommand=hsb.set)
+
+            self.data_table.column("#0", width=0, stretch=NO)
+            self.data_table.heading("#0", text="", anchor=CENTER)
+
+            df = df.copy()
+            df.reset_index(inplace=True)
+            df_col = df.columns.values
+            df_row = df.index.values
+            counter = len(df_col)
+            self.data_table['columns'] = tuple(df_col)
+
+            # 建立欄位名
+            for n in range(counter):
+                title = df_col[n]
+                self.data_table.column(title, width=55, stretch=NO, anchor=CENTER)
+                self.data_table.heading(title, text=title, anchor=CENTER)
+
+                """                    
+                    https://stackoverflow.com/questions/51746465/tkinter-adding-multiple-columns-to-a-treeview
+                    
+                    self.tablex=ttk.Treeview(heigh=10,columns=("#0","#1","#2","#3"))
+                    
+                    self.tablex.heading('#0',text='Text0')
+                    self.tablex.heading('#1',text='Text1')
+                    self.tablex.heading('#2',text='Text2')
+                    self.tablex.heading('#3',text='Text3')
+                """
+
+            # 建立數值至表格中
+            self.data_table.tag_configure('highlight', background='#DD99FF')
+            for m in range(len(df_row)):
+                value = tuple(df.iloc[m].replace(['NaN', 'nan', np.nan], "").tolist())
+                self.data_table.insert(parent='', index='end', text='', values=value, open=False)
+
+            self.prepared = False
+        else:
+            self.after(1000, lambda: self.show_table(df_str))
 
 
 if __name__ == "__main__":
