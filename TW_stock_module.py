@@ -556,7 +556,7 @@ class TWStockRetrieveModule(RetrieveDataModule):
 
         df = df.reset_index().set_index(["stock_id", "date"])
 
-        df = pd.concat([df, price_df], join="inner", axis=1).sort_index(ascending=False).round(2)
+        df = pd.concat([df, price_df], join="inner", axis=1).sort_index().round(2)
         df.index = df.index.map(lambda s: (s[0], s[1].strftime("%b-%y")))
         return df.rename(columns={
             "當月營收": "月營收(億)",
@@ -664,7 +664,7 @@ class TWStockRetrieveModule(RetrieveDataModule):
         df = pd.concat(dfs, axis=1).multiply(0.00001)  # 單位:億
         df = df.groupby("stock_id").apply(cls._pick_cash_flow)
         df["自由現金流量"] = df["投資活動之淨現金流入（流出）"] + df["營業活動之淨現金流入（流出）"]
-        df = df.round(5)
+        df = df.round(3)
         return df.rename(columns={
             "投資活動之淨現金流入（流出）": "理財活動現金",
             "營業活動之淨現金流入（流出）": "營業活動現金",

@@ -493,19 +493,20 @@ class StockAnalysisPage(BaseFrame):
 
         m_report_btn = Button(self, text="月財報", command=lambda: [self.activate_jobs("self.month_fig"), self.show_table("self.month_df")])
         m_report_btn.grid(row=1, column=1, sticky=W)
-        s_report_btn = Button(self, text="季財報", command=lambda: [self.activate_jobs(self.season_fig, x=0, y=4, xs=5), self.show_table("self.season_df")])
+        s_report_btn = Button(self, text="季財報", command=lambda: [self.activate_jobs("self.season_fig", x=0, y=4, xs=5), self.show_table("self.season_df")])
         s_report_btn.grid(row=1, column=2, sticky=W)
-        cash_btn = Button(self, text="現金流", command=lambda: [self.activate_jobs("self.cash_df"), self.show_table("self.cash_df")])
+        cash_btn = Button(self, text="現金流", command=lambda: [self.activate_jobs(), self.show_table("self.cash_df")])
         cash_btn.grid(row=1, column=3, sticky=W)
-        price_btn = Button(self, text="價位分析", command=lambda: [self.activate_jobs("self.est_price_df", self.month_fig), self.show_table("self.est_price_df")])
+        price_btn = Button(self, text="價位分析", command=lambda: [self.activate_jobs("self.month_fig"), self.show_table("self.est_price_df")])
         price_btn.grid(row=1, column=4, sticky=W)
 
         exit_btn = Button(self, text="Exit", command=self.quit)
         exit_btn.grid(row=1, column=5, sticky=W)
 
-        self.data_table = None
+        self.data_table = ttk.Treeview(self)
         self.prepared = False
-        self.canvas = None
+        self.canvas = FigureCanvasTkAgg()
+        self.toolbar = None
 
         self.month_df, self.month_fig = None, None
         self.season_df, self.season_fig = None, None
@@ -513,11 +514,22 @@ class StockAnalysisPage(BaseFrame):
         self.est_price_df = None
 
     @call_by_async
-    async def activate_jobs(self, df_str, fig=None, **kwargs):
+    async def activate_jobs(self, fig=None, **kwargs):
+        await self._clear_interface()
         await self.initial_data()
         if fig:
             await self.create_widget(eval(fig), **kwargs)
         self.prepared = True
+
+    async def _clear_interface(self):
+        self.data_table.delete(*self.data_table.get_children())
+        self.data_table.destroy()
+        if self.canvas:
+            self.canvas.get_tk_widget().destroy()
+            self.canvas = None
+        if self.toolbar:
+            self.toolbar.destroy()
+            self.toolbar = None
 
     async def initial_data(self):
         data_getter = TWStockRetrieveModule
@@ -557,8 +569,8 @@ class StockAnalysisPage(BaseFrame):
 
         # 把matplotlib繪製圖形的導航工具欄顯示到tkinter視窗上
         if tool:
-            toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
-            toolbar.grid(row=y + 1, column=x, sticky=W + E)
+            self.toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
+            self.toolbar.grid(row=y + 1, column=x, sticky=W + E)
             # cls.canvas._tkcanvas.grid(row=y-1, column=x, sticky=s)
 
     def _create_table(self):
@@ -665,48 +677,6 @@ class StockAnalysisPage(BaseFrame):
 
         return fig
 
-    def _show_table(self, df):
-        def fixed_map(option):
-            return [elm for elm in style.map('Treeview', query_opt=option) if
-                    elm[:2] != ('!disabled', '!selected')]
-
-        self.data_table = ttk.Treeview(self, height=15)
-        style = ttk.Style()
-        style.map('Treeview', foreground=fixed_map('foreground'), background=fixed_map('background'))
-
-        self.data_table.grid(row=2, column=0, columnspan=6)
-
-        vsb = ttk.Scrollbar(self, orient="vertical", command=self.data_table.yview)
-        vsb.grid(column=7, row=2, rowspan=2, sticky=N + S)
-        hsb = ttk.Scrollbar(self, orient="horizontal", command=self.data_table.xview)
-        hsb.grid(column=0, row=3, columnspan=6, sticky=W + E)
-        self.data_table.configure(yscrollcommand=vsb.set)
-        self.data_table.configure(xscrollcommand=hsb.set)
-
-        self.data_table.column("#0", width=0, stretch=NO)
-        self.data_table.heading("#0", text="", anchor=CENTER)
-
-        df = df.copy()
-        df.reset_index(inplace=True)
-        df_col = df.columns.values
-        df_row = df.index.values
-        counter = len(df_col)
-        self.data_table['columns'] = tuple(df_col)
-
-        # 建立欄位名
-        for n in range(counter):
-            title = df_col[n]
-            self.data_table.column(title, width=55, stretch=NO, anchor=CENTER)
-            self.data_table.heading(title, text=title, anchor=CENTER)
-
-        # 建立數值至表格中
-        self.data_table.tag_configure('highlight', background='#DD99FF')
-        for m in range(len(df_row)):
-            value = tuple(df.iloc[m].replace(['NaN', 'nan', np.nan], "").tolist())
-            self.data_table.insert(parent='', index='end', text='', values=value, open=False)
-
-        self.prepared = False
-
     def show_table(self, df_str):
         def fixed_map(option):
             return [elm for elm in style.map('Treeview', query_opt=option) if
@@ -729,7 +699,9 @@ class StockAnalysisPage(BaseFrame):
             self.data_table.column("#0", width=0, stretch=NO)
             self.data_table.heading("#0", text="", anchor=CENTER)
 
-            df = df.copy()
+            print(df.index)
+            df = df.copy().loc[::-1].rename_axis("日期")
+            print(df)
             df.reset_index(inplace=True)
             df_col = df.columns.values
             df_row = df.index.values
@@ -761,7 +733,7 @@ class StockAnalysisPage(BaseFrame):
 
             self.prepared = False
         else:
-            self.after(1000, lambda: self.show_table(df_str))
+            self.after(100, lambda: self.show_table(df_str))
 
 
 if __name__ == "__main__":
