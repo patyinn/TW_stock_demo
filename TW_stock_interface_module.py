@@ -635,7 +635,7 @@ class StockAnalysisPage(BaseFrame):
         child = self.data_table.item(self.data_table.get_children()[0])["values"]
         for n in range(len(self.data_table['columns'])):
             col = self.data_table['columns'][n]
-            column_width = max(tkFont.Font().measure(col.title()), tkFont.Font().measure(child[n])+5)
+            column_width = max(tkFont.Font().measure(col.title().split("\n")[0]), tkFont.Font().measure(child[n])+5)
             self.data_table.column(col, minwidth=50, width=column_width, stretch=NO, anchor=CENTER)
 
     def _draw_month_ana_figure(self, df, setting):
@@ -645,10 +645,10 @@ class StockAnalysisPage(BaseFrame):
         mpl.rcParams['axes.unicode_minus'] = False  # 負號顯示
 
         # 建立繪圖物件f figsize的單位是英寸 畫素 = 英寸*解析度
-        figure = plt.figure(num=1, figsize=(10, 10), dpi=90, facecolor="pink", edgecolor='green', frameon=True)
+        figure = plt.figure(num=1, figsize=(20, 20), dpi=360, facecolor="pink", edgecolor='green', frameon=True)
 
         # 建立一副子圖
-        fig, ax1 = plt.subplots(figsize=(4, 4), constrained_layout=False)  # 三個引數，依次是：行，列，當前索引
+        fig, ax1 = plt.subplots(figsize=(5, 5), constrained_layout=False)  # 三個引數，依次是：行，列，當前索引
         plt.subplots_adjust(left=0.1, right=0.9, bottom=0.15, top=0.9)
 
         secondary_y = False
@@ -671,7 +671,7 @@ class StockAnalysisPage(BaseFrame):
         # ,fontsize='xx-large'
         ax1.set_xlabel(setting.get("xlabel", [""])[0])  # 確定座標軸標題
         ax1.xaxis.set_label_coords(0, -0.05)
-        tick_spacing = x.size / 10  # x軸密集度
+        tick_spacing = x.size / 5  # x軸密集度
         ax1.xaxis.set_major_locator(m_ticker.MultipleLocator(tick_spacing))
         ax1.tick_params('x', labelrotation=70)
 
