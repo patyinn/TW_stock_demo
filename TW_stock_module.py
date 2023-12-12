@@ -461,7 +461,7 @@ class TWStockRetrieveModule(RetrieveDataModule):
 
         target_cols = ['當月營收', '上月比較增減(%)', '去年同月增減(%)']
         mapper, dfs = retriever.get_bundle_data(target_cols, season_num*4, stock_id)
-        cls.month_df = pd.concat([cls.month_df, cls.parse_month_df(dfs, cls.price)])
+        cls.month_df = pd.concat([cls.month_df, cls.parse_month_df(dfs, cls.price.copy())])
 
         target_cols = [
             '營業收入合計',
@@ -482,7 +482,7 @@ class TWStockRetrieveModule(RetrieveDataModule):
             '權益總額',
         ]
         mapper, dfs = retriever.get_bundle_data(target_cols, season_num, stock_id, assign_table={"折舊費用": "cash_flows"})
-        cls.season_df = pd.concat([cls.season_df, cls.parse_season_df(dfs, cls.price)])
+        cls.season_df = pd.concat([cls.season_df, cls.parse_season_df(dfs, cls.price.copy())])
 
         target_cols = [
             "投資活動之淨現金流入（流出）",
@@ -574,7 +574,8 @@ class TWStockRetrieveModule(RetrieveDataModule):
         df["權益總計"].fillna(df["權益總額"], inplace=True)
         df.drop("權益總額", axis=1, inplace=True)
 
-        season_report_price = price_df[price_df.index.isin(df.index)]["收盤價"]
+        price_df.index = price_df.index.map(lambda s: (s[0], cls._convert_price_to_season_date(s[1])))
+        season_report_price = price_df.groupby(["stock_id", "date"])["收盤價"].last()
         '''        拆解數據處理        '''
         df["遞減折舊費用"] = df.groupby("stock_id")["折舊費用"].transform(lambda s: cls.data_process_multi_index(s, cum=False))
         '''        累積數據處理        '''
@@ -817,6 +818,21 @@ class TWStockRetrieveModule(RetrieveDataModule):
         else:
             print("Wrong month to determine")
         return f"{year}Q{season}"
+
+    @staticmethod
+    def _convert_price_to_season_date(date):
+        q = date.to_period('Q')
+        y = q.year
+        if q.quarter == 1:
+            date_str = '-05-15'
+        elif q.quarter == 2:
+            date_str = '-08-14'
+        elif q.quarter == 3:
+            date_str = '-11-14'
+        elif q.quarter == 4:
+            y += 1
+            date_str = '-03-31'
+        return pd.to_datetime(f"{y}{date_str}", format="%Y-%m-%d")
 
 
 class FinancialAnalysis(TWStockRetrieveModule, CrawlerConnection):
