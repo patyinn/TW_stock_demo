@@ -53,7 +53,7 @@ class SystemProcessor:
                 else:
                     origin[table_name].setdefault(key, [])
                     if isinstance(value, list):
-                        origin[table_name][key].extend(value)
+                        origin[table_name][key] = value
                     else:
                         origin[table_name][key].append(value)
                     origin[table_name][key] = list(set(origin[table_name][key]))[:10]
@@ -464,7 +464,7 @@ class TWStockRetrieveModule(RetrieveDataModule):
         retriever = RetrieveDataModule(conn)
 
         mapper, dfs = retriever.get_bundle_data(['收盤價'], season_num*65, stock_id)
-        cls.price = dfs[0]
+        cls.price = pd.concat([cls.price, dfs[0]])
 
         target_cols = ['當月營收', '上月比較增減(%)', '去年同月增減(%)']
         mapper, dfs = retriever.get_bundle_data(target_cols, season_num*4, stock_id)
@@ -699,12 +699,15 @@ class TWStockRetrieveModule(RetrieveDataModule):
     def parse_price_estimation(cls, month_df, season_df, price_df):
         per_df, agg_per_df = cls.parse_per_df(season_df, price_df)
 
-        df = pd.DataFrame(dtype=float, index=(["月營收", "營收年增", "既有營收"]))
+        est_df = pd.DataFrame()
         all_ids = month_df.index.get_level_values("stock_id").tolist()
         for stock_id in list(set(all_ids)):
-            df[(stock_id, "短期")] = [month_df.iloc[:3]["月營收(億)"].sum(), month_df.iloc[:3]["月營收年增率"].mean(), month_df.iloc[:9]["月營收(億)"].sum()]
-            df[(stock_id, "中期")] = [month_df.iloc[:6]["月營收(億)"].sum(), month_df.iloc[:6]["月營收年增率"].mean(), month_df.iloc[:6]["月營收(億)"].sum()]
-            df[(stock_id, "長期")] = [month_df.iloc[:12]["月營收(億)"].sum(), month_df.iloc[:12]["月營收年增率"].mean(), month_df.iloc[1]["月營收(億)"].sum()]
+            df = pd.DataFrame(dtype=float, index=(["月營收", "營收年增", "既有營收"]))
+
+            ms_df = month_df.loc[stock_id]
+            df[(stock_id, "短期")] = [ms_df.iloc[:3]["月營收(億)"].sum(), ms_df.iloc[:3]["月營收年增率"].mean(), ms_df.iloc[:9]["月營收(億)"].sum()]
+            df[(stock_id, "中期")] = [ms_df.iloc[:6]["月營收(億)"].sum(), ms_df.iloc[:6]["月營收年增率"].mean(), ms_df.iloc[:6]["月營收(億)"].sum()]
+            df[(stock_id, "長期")] = [ms_df.iloc[:12]["月營收(億)"].sum(), ms_df.iloc[:12]["月營收年增率"].mean(), ms_df.iloc[1]["月營收(億)"].sum()]
 
             avg_4s_pat = season_df.loc[stock_id, "稅後淨利率"].iloc[-4:].mean() / 100
 
@@ -735,12 +738,12 @@ class TWStockRetrieveModule(RetrieveDataModule):
             }).rename(index={"樂觀推估價位": "樂觀推估價位", "極端樂觀推估價位": "極端樂觀推估價位",
                              "悲觀推估價位": "悲觀推估價位", "極端悲觀推估價位": "極端悲觀推估價位"})
 
-            df = pd.concat([df, price_df.T])
+            est_df = pd.concat([df, price_df.T])
 
-        df = df.T.round(2)
-        df.index = pd.MultiIndex.from_tuples(df.index, names=['stock_id', '時間長度'])
+        est_df = est_df.T.round(2)
+        est_df.index = pd.MultiIndex.from_tuples(est_df.index, names=['stock_id', '時間長度'])
 
-        est_df = df[
+        est_df = est_df[
             [
                 "樂觀推估稅後淨利", "悲觀推估稅後淨利", "樂觀推估EPS", "悲觀推估EPS",
                 "極端樂觀推估價位", "樂觀推估價位", "悲觀推估價位", "極端悲觀推估價位",

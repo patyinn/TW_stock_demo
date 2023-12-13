@@ -500,10 +500,10 @@ class StockAnalysisPage(BaseFrame):
             "股東權益報酬率(年預估)", "累積稅後淨利率", "總資產週轉率(次/年)", "權益係數"
         ]
 
+        combo_values = sys_processor.read_from_json("analysis", "cache_id") or ["2330"]
         stock_id_label = Label(self, text="分析股票代號: ", background="pink", font=("TkDefaultFont", 16))
         stock_id_label.grid(row=0, column=0, columnspan=3, sticky=W)
-        # self.stock_id_combo = ttk.Combobox(self, postcommand="", values=sys_processor.read_from_json("analysis", "cache_id"))
-        self.stock_id_combo = ttk.Combobox(self, postcommand="", values=["2330"])
+        self.stock_id_combo = ttk.Combobox(self, postcommand="", values=combo_values)
         self.stock_id_combo.current(0)
         self.stock_id_combo.grid(row=0, column=3, columnspan=2, sticky=W)
 
@@ -545,7 +545,6 @@ class StockAnalysisPage(BaseFrame):
     async def _initial_data(self):
         data_getter = TWStockRetrieveModule
         data_getter.db_path = db_path
-        self._clear_interface()
 
         stock_id = self.stock_id_combo.get()
         if self.prev_id != stock_id:
@@ -573,8 +572,7 @@ class StockAnalysisPage(BaseFrame):
 
             # 記錄此次分析股票代號
             self.prev_id = self.stock_id_combo.get()
-            sys_processor.write_to_json("analysis[]", "stock_id", self.prev_id)
-            self.stock_id_combo["values"] = list(set(list(self.stock_id_combo["values"]) + [self.prev_id]))
+            sys_processor.write_to_json("analysis[]", "cache_id", self.prev_id)
 
         self.prepared = True
 
@@ -592,11 +590,15 @@ class StockAnalysisPage(BaseFrame):
     def activate_tasks(self, df, fig=None):
         if self.prepared and not df.empty:
             self.btn_switch(disable=False)
+            self.stock_id_combo["values"] = list(set(list(self.stock_id_combo["values"]) + [self.prev_id]))
+            self.stock_id_combo.update()
             self._create_table(df, fig)
             self._resize_table()
             self.prepared = False
         else:
             self.btn_switch(disable=True)
+            self._clear_interface()
+
             self.after(500, lambda: self.activate_tasks(df, fig))
 
     def _clear_interface(self):
