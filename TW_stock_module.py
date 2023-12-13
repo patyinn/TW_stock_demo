@@ -27,6 +27,7 @@ from finlab.data_module import RetrieveDataModule
 
 class SystemProcessor:
     lock = threading.Lock()
+    col_keys = ["path", "condition", "analysis"]
 
     def __init__(self, sys_path):
         self.sys_path = sys_path
@@ -37,31 +38,37 @@ class SystemProcessor:
             os.makedirs(os.path.dirname(self.sys_path))
         if not os.path.exists(self.sys_path):
             with open(self.sys_path, "w") as f:
-                f.write(json.dumps({"path": {}, "condition": {}}, ensure_ascii=False, indent=4))
+                f.write(json.dumps({c: {} for c in self.col_keys}, ensure_ascii=False, indent=4))
 
-    def _write_to_json(self, table_name, key, value):
+    def write_to_json(self, table_name, key, value):
         with self.lock:
             with open(self.sys_path, "r+", encoding="UTF-8") as f:
                 origin = json.load(f)
-                if table_name == "path":
-                    origin[table_name].setdefault(key, [])
-                    origin[table_name][key].append(value)
-                    origin[table_name][key] = list(set(origin[table_name][key]))
-                elif table_name == "condition":
+                _is_dict = table_name.endswith("{}")
+                table_name = table_name[:-2]
+                origin.setdefault(table_name, {})
+                if _is_dict:
                     origin[table_name].setdefault(key, {})
                     origin[table_name][key] = value
+                else:
+                    origin[table_name].setdefault(key, [])
+                    if isinstance(value, list):
+                        origin[table_name][key].extend(value)
+                    else:
+                        origin[table_name][key].append(value)
+                    origin[table_name][key] = list(set(origin[table_name][key]))[:10]
 
                 f.seek(0)
                 json.dump(origin, f, ensure_ascii=False, indent=4)
                 f.truncate()
 
-    def _read_from_json(self, table_name, key):
+    def read_from_json(self, table_name, key):
         with self.lock:
             with open(self.sys_path, "r", encoding="UTF-8") as f:
                 data = json.load(f)
-                return data[table_name].get(key, None)
+                return data.get(table_name, {}).get(key, None)
 
-    def _del_from_json(self, table_name, key, value):
+    def del_from_json(self, table_name, key, value):
         with self.lock:
             with open(self.sys_path, "r+", encoding="UTF-8") as f:
                 origin = json.load(f)
@@ -91,16 +98,16 @@ class SystemProcessor:
             else:
                 print("it's an invalid path")
         if key and value:
-            self._write_to_json("path", key, value)
+            self.write_to_json("path[]", key, value)
 
     def get_latest_path_sql(self, category):
-        result = self._read_from_json("path", category)
+        result = self.read_from_json("path", category)
         return result[-1] if result else ""
 
     def del_path_sql(self, category, path):
-        self._del_from_json("path", category, path)
+        self.del_from_json("path", category, path)
 
-    def save_select_stock_cache_to_sql(self, combination):
+    def save_select_stock_condition_to_sql(self, combination):
         for com in zip(*combination):
             cond_dic = {
                 "cond_name": com[0],
@@ -109,10 +116,10 @@ class SystemProcessor:
                 "operator": com[3],
                 "cond_value": com[4]
             }
-            self._write_to_json("condition", cond_dic["cond_name"], cond_dic)
+            self.write_to_json("condition{}", cond_dic["cond_name"], cond_dic)
 
-    def get_select_stock_cache_to_sql(self, condition):
-        result = self._read_from_json("condition", condition)
+    def get_select_stock_condition_to_sql(self, condition):
+        result = self.read_from_json("condition", condition)
         return result if result is not None else {
             "cond_name": condition,
             "activate": False,
@@ -746,36 +753,33 @@ class TWStockRetrieveModule(RetrieveDataModule):
         return est_df, per_df
 
     @classmethod
-    def handle_data_to_draw(cls, stock_id, setting):
+    def prepare_df_to_draw(cls, stock_id, setting):
         if not cls.mapper or stock_id not in cls.month_df.index.get_level_values("stock_id"):
             cls.retrieve_data_from_db(stock_id)
 
         df_list = []
         for m in setting.get("main"):
-            df = cls.mapper.get(m)
-            df = df.loc[stock_id].rename(f"m*{m}")
-            df.index = df.index.strftime("%b-%y")
+            df = cls.mapper.get(m).loc[stock_id]
             if m == "股價":
-                df = df.groupby(df.index).mean().sort_values()
-            df = df.round(2)
-            df_list.append(df)
-        for s in setting.get("sub", []):
-            ma = re.match(r"([\u4e00-\u9fa5]+)(\d+)\w+移動平均", s)
-            if ma:
-                s1 = ma.group(1)
-                month = int(ma.group(2))
-            else:
-                s1 = s
-                month = None
-            df = cls.mapper.get(s1)
-            df = df.loc[stock_id].rename(f"s*{s}")
-            if month:
-                df = df.rolling(month).mean().reindex(index=df.index).rename(f"s*{s}")
-            df = df.round(2)
-            df_list.append(df)
+                df.index = df.index.strftime("%b-%y")
+                df = df.groupby(df.index).mean()
+            df_list.append(df.rename(f"m*{m}"))
 
-        final = pd.concat(df_list, join="inner", axis=1).sort_index(ascending=False)
-        final.index = final.index.rename("日期")
+        for s in setting.get("sub", []):
+            is_ma = re.match(r"([\u4e00-\u9fa5]+)(\d+)\w+移動平均", s)
+            if is_ma:
+                col_name = is_ma.group(1)
+                is_month = int(is_ma.group(2))
+            else:
+                col_name = s
+                is_month = None
+            df = cls.mapper.get(col_name).loc[stock_id]
+            if is_month:
+                df = df.rolling(is_month).mean().reindex(index=df.index)
+            df_list.append(df.rename(f"s*{s}"))
+
+        final = pd.concat(df_list, join="inner", axis=1).rename_axis(index="日期").round(2)
+        final.sort_index(inplace=True, ascending=False, key=lambda s: pd.to_datetime(s, format="%b-%y"))
         return final, setting
 
     @staticmethod

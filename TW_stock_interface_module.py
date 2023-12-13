@@ -378,7 +378,7 @@ class SelectStockPage(BaseTemplateFrame):
             content = f"""{chk.cget("text")} {combo.get()} {entry.get()}""" if combo else None
             self.content_list.append(content)
 
-        sys_processor.save_select_stock_cache_to_sql(
+        sys_processor.save_select_stock_condition_to_sql(
             (self.chk_list, self.chk_var_list, self.content_list, self.combo_list, self.entry_list))
 
     # 顯示執行項目
@@ -403,6 +403,7 @@ class SelectStockPage(BaseTemplateFrame):
         msg_queue.put("開始選股")
         result = await select_stock.my_strategy(date=date, cond_content=cond_content_list, activate=activate_list)
         self.selected_stock = list(result.index)
+        sys_processor.write_to_json("analysis[]", "select_stock", self.selected_stock)
 
         msg_queue.put("符合選擇條件的股票有: {}\n".format(self.selected_stock))
 
@@ -437,7 +438,7 @@ class SelectStockPage(BaseTemplateFrame):
     def update_func(self):
         self.clear_func()
         for (chk, chk_var, combo, entry), cond in zip(self.component_list, self.create_condition_list):
-            cache = self.sys_processor.get_select_stock_cache_to_sql(cond)
+            cache = self.sys_processor.get_select_stock_condition_to_sql(cond)
             chk_var.set(bool(cache["activate"]))
             if chk_var.get():
                 entry.insert(0, str(cache["cond_value"]) or "")
@@ -446,11 +447,11 @@ class SelectStockPage(BaseTemplateFrame):
                 entry.delete(0, "end")
                 combo.delete(0, "end")
 
-        sp_cache = self.sys_processor.get_select_stock_cache_to_sql("停利")
-        sl_cache = self.sys_processor.get_select_stock_cache_to_sql("停損")
-        self.start.insert(0, self.sys_processor.get_select_stock_cache_to_sql("選股日期:")["cond_value"])
-        self.end.insert(0, self.sys_processor.get_select_stock_cache_to_sql("回測起始日期:")["cond_value"])
-        self.period.insert(0, self.sys_processor.get_select_stock_cache_to_sql("週期天數:")["cond_value"])
+        sp_cache = self.sys_processor.get_select_stock_condition_to_sql("停利")
+        sl_cache = self.sys_processor.get_select_stock_condition_to_sql("停損")
+        self.start.insert(0, self.sys_processor.get_select_stock_condition_to_sql("選股日期:")["cond_value"])
+        self.end.insert(0, self.sys_processor.get_select_stock_condition_to_sql("回測起始日期:")["cond_value"])
+        self.period.insert(0, self.sys_processor.get_select_stock_condition_to_sql("週期天數:")["cond_value"])
         self.sp_chk_var.set(sp_cache["activate"])
         self.sl_chk_var.set(sl_cache["activate"])
         self.sp_entry.insert(0, sp_cache["cond_value"])
@@ -494,28 +495,51 @@ class StockAnalysisPage(BaseFrame):
         self.season_df, self.season_fig = pd.DataFrame(), plt.figure()
         self.cash_df = pd.DataFrame()
         self.est_price_df = pd.DataFrame()
+        self.season_figs_cols = [
+            "營業利益率", "應收帳款週轉率", "存貨周轉率", "存貨占營收比",
+            "股東權益報酬率(年預估)", "累積稅後淨利率", "總資產週轉率(次/年)", "權益係數"
+        ]
 
         stock_id_label = Label(self, text="分析股票代號: ", background="pink", font=("TkDefaultFont", 16))
         stock_id_label.grid(row=0, column=0, columnspan=3, sticky=W)
-        self.stock_id_combo = ttk.Combobox(self, postcommand="", values=["2330", "0050"])
+        # self.stock_id_combo = ttk.Combobox(self, postcommand="", values=sys_processor.read_from_json("analysis", "cache_id"))
+        self.stock_id_combo = ttk.Combobox(self, postcommand="", values=["2330"])
         self.stock_id_combo.current(0)
-        self.stock_id_combo.grid(row=0, column=3, columnspan=3, sticky=W)
-        self._initial_data()
+        self.stock_id_combo.grid(row=0, column=3, columnspan=2, sticky=W)
+
+        self.source_btn = Button(self, text="切換來源 (舊/選股)", command=lambda: self.switch_combo_source())
+        self.source_btn.grid(row=0, column=5, sticky=W)
 
         back_btn = Button(self, text="Go back", command=lambda: master.switch_frame(StartPage))
         back_btn.grid(row=1, column=0, sticky=W)
 
-        m_report_btn = Button(self, text="月財報", command=lambda: [self._initial_data(), self.activate_tasks(self.month_df, self.month_fig)])
-        m_report_btn.grid(row=1, column=1, sticky=W)
-        s_report_btn = Button(self, text="季財報", command=lambda: [self._initial_data(), self.activate_tasks(self.season_df, self.season_fig, x=0, y=4, xs=5)])
-        s_report_btn.grid(row=1, column=2, sticky=W)
-        cash_btn = Button(self, text="現金流", command=lambda: [self._initial_data(), self.activate_tasks(self.cash_df)])
-        cash_btn.grid(row=1, column=3, sticky=W)
-        price_btn = Button(self, text="價位分析", command=lambda: [self._initial_data(), self.activate_tasks(self.est_price_df, self.month_fig)])
-        price_btn.grid(row=1, column=4, sticky=W)
+        self.m_report_btn = Button(self, text="月財報", command=lambda: [self._initial_data(), self.activate_tasks(self.month_df, self.month_fig)])
+        self.m_report_btn.grid(row=1, column=1, sticky=W)
+        self.s_report_btn = Button(self, text="季財報", command=lambda: [self._initial_data(), self.activate_tasks(self.season_df, self.season_fig)])
+        self.s_report_btn.grid(row=1, column=2, sticky=W)
+        self.cash_btn = Button(self, text="現金流", command=lambda: [self._initial_data(), self.activate_tasks(self.cash_df)])
+        self.cash_btn.grid(row=1, column=3, sticky=W)
+        self.price_btn = Button(self, text="價位分析", command=lambda: [self._initial_data(), self.activate_tasks(self.est_price_df, self.month_fig)])
+        self.price_btn.grid(row=1, column=4, sticky=W)
 
         exit_btn = Button(self, text="Exit", command=self.quit)
         exit_btn.grid(row=1, column=5, sticky=W)
+
+        self._initial_data()
+
+    def btn_switch(self, disable=False):
+        if disable:
+            self.source_btn["state"] = "disabled"
+            self.m_report_btn["state"] = "disabled"
+            self.s_report_btn["state"] = "disabled"
+            self.cash_btn["state"] = "disabled"
+            self.price_btn["state"] = "disabled"
+        else:
+            self.source_btn["state"] = "normal"
+            self.m_report_btn["state"] = "normal"
+            self.s_report_btn["state"] = "normal"
+            self.cash_btn["state"] = "normal"
+            self.price_btn["state"] = "normal"
 
     @call_by_async
     async def _initial_data(self):
@@ -533,34 +557,47 @@ class StockAnalysisPage(BaseFrame):
                 "xlabel": ["日期"],
                 "ylabel": ["價位", "增幅(%)"],
             }
-            self.month_df = data_getter.retrieve_month_data(stock_id)
-            fig, setting = data_getter.handle_data_to_draw(stock_id, month_setting)
+            self.month_df = data_getter.retrieve_month_data(stock_id).loc[::-1].T.rename_axis("內容")
+            fig, setting = data_getter.prepare_df_to_draw(stock_id, month_setting)
             self.month_fig = self._draw_month_ana_figure(fig, setting)
 
             # 季財報
-            self.season_df = data_getter.retrieve_season_data(stock_id)
+            self.season_df = data_getter.retrieve_season_data(stock_id).loc[::-1].T.rename_axis(["分類", "細項"])
             self.season_fig = self._draw_season_ana_figures()
 
             # 現金流
-            self.cash_df = data_getter.retrieve_cash_data(stock_id)
+            self.cash_df = data_getter.retrieve_cash_data(stock_id).loc[::-1].T.rename_axis("內容")
 
             # 預估股價
-            self.est_price_df = data_getter.retrieve_price_estimation(stock_id)
+            self.est_price_df = data_getter.retrieve_price_estimation(stock_id).loc[::-1].T.rename_axis(["程度", "內容"])
 
             # 記錄此次分析股票代號
             self.prev_id = self.stock_id_combo.get()
+            sys_processor.write_to_json("analysis[]", "stock_id", self.prev_id)
+            self.stock_id_combo["values"] = list(set(list(self.stock_id_combo["values"]) + [self.prev_id]))
 
         self.prepared = True
 
-    def activate_tasks(self, df, fig=None, **kwargs):
+    def switch_combo_source(self):
+        now = sorted(list(self.stock_id_combo["values"]))
+        record = sorted(sys_processor.read_from_json("analysis", "cache_id") or [])
+        select_stock = sorted(sys_processor.read_from_json("analysis", "select_stock") or [])
+        if not record and not select_stock:
+            self.stock_id_combo["values"] = ["2330"]
+        elif now == record:
+            self.stock_id_combo["values"] = select_stock
+        else:
+            self.stock_id_combo["values"] = record
+
+    def activate_tasks(self, df, fig=None):
         if self.prepared and not df.empty:
-            self._create_table(df)
-            if fig:
-                self._create_widget(fig, **kwargs)
+            self.btn_switch(disable=False)
+            self._create_table(df, fig)
             self._resize_table()
             self.prepared = False
         else:
-            self.after(500, lambda: self.activate_tasks(df, fig, **kwargs))
+            self.btn_switch(disable=True)
+            self.after(500, lambda: self.activate_tasks(df, fig))
 
     def _clear_interface(self):
         self.data_table.delete(*self.data_table.get_children())
@@ -572,7 +609,7 @@ class StockAnalysisPage(BaseFrame):
             self.toolbar.destroy()
             self.toolbar = None
 
-    def _create_widget(self, figure, x=7, y=2, xs=1, ys=1, s=W + E + N + S, tool=True):
+    def _create_widget(self, event, figure, x=7, y=2, xs=1, ys=1, s=W + E + N + S, tool=True):
         self.canvas = FigureCanvasTkAgg(figure, self)
         self.canvas.draw()
         self.canvas.get_tk_widget().grid(row=y, column=x, sticky=s, rowspan=ys, columnspan=xs)
@@ -583,7 +620,13 @@ class StockAnalysisPage(BaseFrame):
             self.toolbar.grid(row=y + 1, column=x, sticky=W + E)
             # cls.canvas._tkcanvas.grid(row=y-1, column=x, sticky=s)
 
-    def _create_table(self, df):
+        for selected_item in self.data_table.selection():
+            item = self.data_table.item(selected_item)
+            record = item['values']
+            print(record, item)
+    #         showinfo(title='Information', message=','.join(record))
+
+    def _create_table(self, df, fig):
         def _fixed_map(option):
             return [elm for elm in style.map('Treeview', query_opt=option) if
                     elm[:2] != ('!disabled', '!selected')]
@@ -595,9 +638,9 @@ class StockAnalysisPage(BaseFrame):
         self.data_table.grid(row=2, column=0, columnspan=6)
 
         self.data_table.column("#0", width=0, stretch=NO)
-        self.data_table.heading("#0", text="\n\n", anchor=CENTER)
+        self.data_table.heading("#0", text="", anchor=CENTER)
 
-        self._insert_table(df)
+        self._insert_table(df, fig)
 
         vsb = ttk.Scrollbar(self, orient="vertical", command=self.data_table.yview)
         vsb.grid(column=6, row=2, rowspan=2, sticky=N + S)
@@ -606,36 +649,31 @@ class StockAnalysisPage(BaseFrame):
         self.data_table.configure(yscrollcommand=vsb.set)
         self.data_table.configure(xscrollcommand=hsb.set)
 
-    def _insert_table(self, df):
-        df = df.copy().loc[::-1].rename_axis("日期")
+    def _insert_table(self, df, fig):
+        df = df.copy()
         df.reset_index(inplace=True)
-        df_row = df.index.values
-        df_col = []
-        for col in df.columns.values:
-            if isinstance(col, str):
-                if len(col) < 10:
-                    df_col.append(col)
-                else:
-                    df_col.append(f"{col[:5]}\n{col[5:]}")
-            else:
-                df_col.append("\n".join(col))
-        self.data_table['columns'] = df_col
+        df_rows = df.index.values
+        df_cols = df.columns.tolist()
+        self.data_table['columns'] = df_cols
         # 建立欄位名
-        for n in range(len(df_col)):
-            self.data_table.column(df_col[n], minwidth=10, width=int(600/len(df_col)), stretch=NO, anchor=CENTER)
-            self.data_table.heading(df_col[n], text=df_col[n], anchor=CENTER)
+        for n in range(len(df_cols)):
+            self.data_table.column(df_cols[n], minwidth=10, width=int(600/len(df_cols)), stretch=NO, anchor=CENTER)
+            self.data_table.heading(df_cols[n], text=df_cols[n], anchor=CENTER)
         # 建立數值至表格中
         self.data_table.tag_configure('highlight', background='#DD99FF')
-        for m in range(len(df_row)):
+        for m in range(len(df_rows)):
             value = tuple(df.iloc[m].replace(['NaN', 'nan', np.nan], "").tolist())
             self.data_table.insert(parent='', index="end", values=value, open=False)
+        if fig:
+            self.data_table.bind('<<TreeviewSelect>>', lambda event: self._create_widget(event, fig))
 
     def _resize_table(self):
         self.data_table.update()
-        child = self.data_table.item(self.data_table.get_children()[0])["values"]
+        children = [self.data_table.item(item)["values"] for item in self.data_table.get_children()]
+        children = [max(x, key=len) for x in zip(*children)]
         for n in range(len(self.data_table['columns'])):
             col = self.data_table['columns'][n]
-            column_width = max(tkFont.Font().measure(col.title().split("\n")[0]), tkFont.Font().measure(child[n])+5)
+            column_width = tkFont.Font().measure(children[n])-5
             self.data_table.column(col, minwidth=50, width=column_width, stretch=NO, anchor=CENTER)
 
     def _draw_month_ana_figure(self, df, setting):
@@ -644,11 +682,8 @@ class StockAnalysisPage(BaseFrame):
         mpl.rcParams['font.sans-serif'] = ['Microsoft JhengHei']  # 中文顯示
         mpl.rcParams['axes.unicode_minus'] = False  # 負號顯示
 
-        # 建立繪圖物件f figsize的單位是英寸 畫素 = 英寸*解析度
-        figure = plt.figure(num=1, figsize=(20, 20), dpi=360, facecolor="pink", edgecolor='green', frameon=True)
-
         # 建立一副子圖
-        fig, ax1 = plt.subplots(figsize=(5, 5), constrained_layout=False)  # 三個引數，依次是：行，列，當前索引
+        fig, ax1 = plt.subplots(figsize=(5, 5), constrained_layout=False, dpi=80)  # 三個引數，依次是：行，列，當前索引
         plt.subplots_adjust(left=0.1, right=0.9, bottom=0.15, top=0.9)
 
         secondary_y = False
@@ -697,27 +732,24 @@ class StockAnalysisPage(BaseFrame):
         mpl.rcParams['font.sans-serif'] = ['Microsoft JhengHei']  # 中文顯示
         mpl.rcParams['axes.unicode_minus'] = False  # 負號顯示
 
-        figure = plt.figure(num=8, figsize=(5, 2), dpi=80, facecolor="gold", edgecolor='green', frameon=True)
-        draw_df = self.season_df.copy()
+        draw_df = self.season_df.copy().T
         draw_df.columns = draw_df.columns.get_level_values(1)
-        draw_df = draw_df[[
-            "營業利益率", "應收帳款週轉率", "存貨周轉率", "存貨占營收比",
-            "股東權益報酬率(年預估)", "累積稅後淨利率", "總資產週轉率(次/年)", "權益係數"]]
+        draw_df = draw_df[self.season_figs_cols]
 
-        nrows, ncols = 2, 4
-        fig, axes = plt.subplots(nrows=nrows, ncols=ncols)
+        num_cols, num_rows = 4, len(draw_df.columns) // 4
+
+        fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, dpi=80)
+        plt.subplots_adjust(hspace=0.5, wspace=0.5)
         count = 0
-        for r in range(nrows):
-            for c in range(ncols):
-                df = draw_df.iloc[count]
-                df.plot(ax=axes[r, c])
-                axes[r, c].set_title(df.name, loc='center', color='red', pad=5)
+        for r in range(num_rows):
+            for c in range(num_cols):
+                plt_df = draw_df.iloc[:, count]
+                plt_df.plot(ax=axes[r, c])
+                axes[r, c].set_title(plt_df.name, loc='center', color='red', pad=5)
                 axes[r, c].invert_xaxis()
                 count += 1
-
         # plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=None)
         # fig.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=None, hspace=None)
-
         return fig
 
 
