@@ -106,6 +106,11 @@ class BaseFrame(Frame):
     def clear_func(self):
         self.scroll_txt.delete(1.0, "end")
 
+    def _resize_window(self):
+        required_width = self.winfo_reqwidth()
+        required_height = self.winfo_reqheight()
+        self.master.geometry(f"{required_width}x{required_height}")
+
 
 class BaseScrapperFrame(BaseFrame):
     def __init__(self, master, mode, db_path,  start_page, table_name, async_loop):

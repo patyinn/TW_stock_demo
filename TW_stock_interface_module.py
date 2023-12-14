@@ -3,21 +3,21 @@ import time
 import asyncio
 import sqlite3
 import numpy as np
+import pandas as pd
+
 import matplotlib.pyplot as plt
 import matplotlib.ticker as m_ticker
 import tkinter.font as tkFont
 
 from datetime import datetime
 from tkinter import Tk, Button, Label, StringVar, W, E, N, S, Frame, BooleanVar, Checkbutton, CENTER, NO
-from tkinter import ttk, filedialog
-
-import pandas as pd
+from tkinter import ttk, filedialog, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.pylab import mpl
 
+from utils import call_by_async
 from TW_stock_module import SystemProcessor, TWStockRetrieveModule, FinancialAnalysis, SelectStock, CrawlerProcessor
 from TW_stock_base_frame import BaseScrapperFrame, BaseTemplateFrame, msg_queue, BaseFrame
-from utils import call_by_async
 
 
 class StockApp(Tk):
@@ -43,7 +43,7 @@ class StartPage(Frame):
         global db_path, sys_processor
         super().__init__(master)
         Frame.configure(self, bg='pink')
-        
+
         # 設置資料庫位置
         self.db_path_lbl = Label(self, text="資料庫路徑: ", background="pink", font=("TkDefaultFont", 16))
         self.db_path_lbl.grid(row=0, column=0, sticky=W + E + N + S)
@@ -499,6 +499,8 @@ class StockAnalysisPage(BaseFrame):
             "營業利益率", "應收帳款週轉率", "存貨周轉率", "存貨占營收比",
             "股東權益報酬率(年預估)", "累積稅後淨利率", "總資產週轉率(次/年)", "權益係數"
         ]
+        self.num_cols = 4
+        self.num_rows = len(self.season_figs_cols) // self.num_cols
 
         combo_values = sys_processor.read_from_json("analysis", "cache_id") or ["2330"]
         stock_id_label = Label(self, text="分析股票代號: ", background="pink", font=("TkDefaultFont", 16))
@@ -507,7 +509,7 @@ class StockAnalysisPage(BaseFrame):
         self.stock_id_combo.current(0)
         self.stock_id_combo.grid(row=0, column=3, columnspan=2, sticky=W)
 
-        self.source_btn = Button(self, text="切換來源 (舊/選股)", command=lambda: self.switch_combo_source())
+        self.source_btn = Button(self, text="切換來源 (選股)", command=lambda: self.switch_combo_source())
         self.source_btn.grid(row=0, column=5, sticky=W)
 
         back_btn = Button(self, text="Go back", command=lambda: master.switch_frame(StartPage))
@@ -527,20 +529,6 @@ class StockAnalysisPage(BaseFrame):
 
         self._initial_data()
 
-    def btn_switch(self, disable=False):
-        if disable:
-            self.source_btn["state"] = "disabled"
-            self.m_report_btn["state"] = "disabled"
-            self.s_report_btn["state"] = "disabled"
-            self.cash_btn["state"] = "disabled"
-            self.price_btn["state"] = "disabled"
-        else:
-            self.source_btn["state"] = "normal"
-            self.m_report_btn["state"] = "normal"
-            self.s_report_btn["state"] = "normal"
-            self.cash_btn["state"] = "normal"
-            self.price_btn["state"] = "normal"
-
     @call_by_async
     async def _initial_data(self):
         data_getter = TWStockRetrieveModule
@@ -558,10 +546,10 @@ class StockAnalysisPage(BaseFrame):
             }
             self.month_df = data_getter.retrieve_month_data(stock_id).loc[::-1].T.rename_axis("內容")
             fig, setting = data_getter.prepare_df_to_draw(stock_id, month_setting)
-            self.month_fig = self._draw_month_ana_figure(fig, setting)
+            self.month_fig = self._draw_figure(fig, setting)
 
             # 季財報
-            self.season_df = data_getter.retrieve_season_data(stock_id).loc[::-1].T.rename_axis(["分類", "細項"])
+            self.season_df = data_getter.retrieve_season_data(stock_id).loc[::-1].T.rename_axis(["分類", "內容"])
             self.season_fig = self._draw_season_ana_figures()
 
             # 現金流
@@ -584,8 +572,24 @@ class StockAnalysisPage(BaseFrame):
             self.stock_id_combo["values"] = ["2330"]
         elif now == record:
             self.stock_id_combo["values"] = select_stock
+            self.stock_id_combo["text"] = "切換來源 (歷史)"
         else:
             self.stock_id_combo["values"] = record
+            self.stock_id_combo["text"] = "切換來源 (選股)"
+
+    def btn_switch(self, disable=False):
+        if disable:
+            self.source_btn["state"] = "disabled"
+            self.m_report_btn["state"] = "disabled"
+            self.s_report_btn["state"] = "disabled"
+            self.cash_btn["state"] = "disabled"
+            self.price_btn["state"] = "disabled"
+        else:
+            self.source_btn["state"] = "normal"
+            self.m_report_btn["state"] = "normal"
+            self.s_report_btn["state"] = "normal"
+            self.cash_btn["state"] = "normal"
+            self.price_btn["state"] = "normal"
 
     def activate_tasks(self, df, fig=None):
         if self.prepared and not df.empty:
@@ -594,6 +598,7 @@ class StockAnalysisPage(BaseFrame):
             self.stock_id_combo.update()
             self._create_table(df, fig)
             self._resize_table()
+            self._resize_window()
             self.prepared = False
         else:
             self.btn_switch(disable=True)
@@ -611,10 +616,10 @@ class StockAnalysisPage(BaseFrame):
             self.toolbar.destroy()
             self.toolbar = None
 
-    def _create_widget(self, event, figure, x=7, y=2, xs=1, ys=1, s=W + E + N + S, tool=True):
+    def _create_widget(self, figure, x=7, y=2, xs=1, ys=1, s=W + E + N + S, tool=True):
         self.canvas = FigureCanvasTkAgg(figure, self)
         self.canvas.draw()
-        self.canvas.get_tk_widget().grid(row=y, column=x, sticky=s, rowspan=ys, columnspan=xs)
+        self.canvas.get_tk_widget().grid(row=y, column=x, sticky=s, rowspan=xs, columnspan=ys, padx=5, pady=5, ipadx=3, ipady=3)
 
         # 把matplotlib繪製圖形的導航工具欄顯示到tkinter視窗上
         if tool:
@@ -622,11 +627,19 @@ class StockAnalysisPage(BaseFrame):
             self.toolbar.grid(row=y + 1, column=x, sticky=W + E)
             # cls.canvas._tkcanvas.grid(row=y-1, column=x, sticky=s)
 
+    def _bind_widget(self, event, df):
         for selected_item in self.data_table.selection():
-            item = self.data_table.item(selected_item)
-            record = item['values']
-            print(record, item)
-    #         showinfo(title='Information', message=','.join(record))
+            record = self.data_table.item(selected_item)['values']
+            if record[1] in self.season_figs_cols:
+                setting = {
+                    "title": record[1],
+                    "main": [record[1]],
+                    "xlabel": ["日期"],
+                    "ylabel": [""],
+                }
+                fig = self._draw_figure(df[[record[1]]], setting)
+                fig.show()
+                break
 
     def _create_table(self, df, fig):
         def _fixed_map(option):
@@ -657,17 +670,22 @@ class StockAnalysisPage(BaseFrame):
         df_rows = df.index.values
         df_cols = df.columns.tolist()
         self.data_table['columns'] = df_cols
+
         # 建立欄位名
         for n in range(len(df_cols)):
             self.data_table.column(df_cols[n], minwidth=10, width=int(600/len(df_cols)), stretch=NO, anchor=CENTER)
             self.data_table.heading(df_cols[n], text=df_cols[n], anchor=CENTER)
+
         # 建立數值至表格中
         self.data_table.tag_configure('highlight', background='#DD99FF')
         for m in range(len(df_rows)):
             value = tuple(df.iloc[m].replace(['NaN', 'nan', np.nan], "").tolist())
             self.data_table.insert(parent='', index="end", values=value, open=False)
+
         if fig:
-            self.data_table.bind('<<TreeviewSelect>>', lambda event: self._create_widget(event, fig))
+            self._create_widget(fig)
+            draw_df = df.drop(["分類", "程度"], axis=1, errors="ignore").set_index(["內容"]).T
+            self.data_table.bind('<<TreeviewSelect>>', lambda event: self._bind_widget(event, draw_df))
 
     def _resize_table(self):
         self.data_table.update()
@@ -675,10 +693,11 @@ class StockAnalysisPage(BaseFrame):
         children = [max(x, key=len) for x in zip(*children)]
         for n in range(len(self.data_table['columns'])):
             col = self.data_table['columns'][n]
-            column_width = tkFont.Font().measure(children[n])-5
+            column_width = tkFont.Font().measure(children[n])
+            column_width -= 80 if column_width > 150 else 10
             self.data_table.column(col, minwidth=50, width=column_width, stretch=NO, anchor=CENTER)
 
-    def _draw_month_ana_figure(self, df, setting):
+    def _draw_figure(self, df, setting):
         """建立繪圖物件"""
         # 設定中文顯示字型
         mpl.rcParams['font.sans-serif'] = ['Microsoft JhengHei']  # 中文顯示
@@ -693,13 +712,15 @@ class StockAnalysisPage(BaseFrame):
         color_list = ["red", "green", "blue", "pink", "orange"]
         for col_name, color in zip(df.columns, color_list):
             axis = col_name.split("*")
-            if axis[0] == "m":
-                ax1.plot(x, df[col_name], color=color, label=axis[1])
-            else:
+            if axis[0] == "s":
                 if not secondary_y:
                     ax2 = ax1.twinx()
                 ax2.plot(x, df[col_name], color=color, label=axis[1], linestyle="--")
                 secondary_y = True
+            elif axis[0] == "m":
+                ax1.plot(x, df[col_name], color=color, label=axis[1])
+            else:
+                ax1.plot(x, df[col_name], color=color, label=col_name)
 
         ax1.set_title(setting.get("title", ""), loc='center', pad=5, fontsize='large', color='red')  # 設定標題
         # 定義legend 重新定義了一次label
@@ -725,7 +746,6 @@ class StockAnalysisPage(BaseFrame):
         ax1.grid(which='major', axis='x', color='gray', linestyle='-', linewidth=0.5, alpha=0.2)  # 設定網格
         ax1.invert_xaxis()
         ax1.legend(line, label, loc=0)
-
         return fig
 
     def _draw_season_ana_figures(self):
@@ -738,13 +758,11 @@ class StockAnalysisPage(BaseFrame):
         draw_df.columns = draw_df.columns.get_level_values(1)
         draw_df = draw_df[self.season_figs_cols]
 
-        num_cols, num_rows = 4, len(draw_df.columns) // 4
-
-        fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, dpi=80)
+        fig, axes = plt.subplots(nrows=self.num_rows, ncols=self.num_cols, dpi=80)
         plt.subplots_adjust(hspace=0.5, wspace=0.5)
         count = 0
-        for r in range(num_rows):
-            for c in range(num_cols):
+        for r in range(self.num_rows):
+            for c in range(self.num_cols):
                 plt_df = draw_df.iloc[:, count]
                 plt_df.plot(ax=axes[r, c])
                 axes[r, c].set_title(plt_df.name, loc='center', color='red', pad=5)
