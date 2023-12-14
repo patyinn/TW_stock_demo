@@ -501,12 +501,12 @@ class TWStockRetrieveModule(RetrieveDataModule):
         mapper, dfs = retriever.get_bundle_data(target_cols, int(season_num/4*10), stock_id)
         cls.cash_df = pd.concat([cls.cash_df, cls.parse_cash_df(dfs)])
 
-        est_month_df = cls.month_df.loc[:, ["月營收(億)", "月營收年增率"]]
-        est_season_df = cls.season_df.loc[:, [('獲利能力', '每股稅後盈餘'), ('獲利能力', '稅後淨利率'), ('資產負債表', '股本合計')]]
+        est_month_df = cls.month_df.loc[[stock_id], ["月營收(億)", "月營收年增率"]]
+        est_season_df = cls.season_df.loc[[stock_id], [('獲利能力', '每股稅後盈餘'), ('獲利能力', '稅後淨利率'), ('資產負債表', '股本合計')]]
         est_season_df.columns = est_season_df.columns.droplevel()
         est_price_df = cls.price.copy()
         est_df, per_df = cls.parse_price_estimation(est_month_df, est_season_df, est_price_df)
-        cls.estimation_df = pd.concat([cls.estimation_df, est_df])
+        cls.estimation_df = pd.concat([cls.estimation_df, est_df]).drop_duplicates(keep="last")
         cls.per_df = pd.concat([cls.per_df, per_df])
 
         # 這裡未改，會有問題
@@ -738,7 +738,8 @@ class TWStockRetrieveModule(RetrieveDataModule):
             }).rename(index={"樂觀推估價位": "樂觀推估價位", "極端樂觀推估價位": "極端樂觀推估價位",
                              "悲觀推估價位": "悲觀推估價位", "極端悲觀推估價位": "極端悲觀推估價位"})
 
-            est_df = pd.concat([df, price_df.T])
+            df = pd.concat([df, price_df.T])
+            est_df = pd.concat([df, est_df], axis=1)
 
         est_df = est_df.T.round(2)
         est_df.index = pd.MultiIndex.from_tuples(est_df.index, names=['stock_id', '時間長度'])

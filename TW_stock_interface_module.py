@@ -486,6 +486,9 @@ class StockAnalysisPage(BaseFrame):
         self.master = master
         self.prev_id = ""
 
+        self.data_getter = TWStockRetrieveModule
+        self.data_getter.db_path = db_path
+
         self.data_table = ttk.Treeview(self)
         self.prepared = False
         self.canvas = FigureCanvasTkAgg()
@@ -529,13 +532,22 @@ class StockAnalysisPage(BaseFrame):
 
         self._initial_data()
 
-    @call_by_async
-    async def _initial_data(self):
-        data_getter = TWStockRetrieveModule
-        data_getter.db_path = db_path
-
+    # @call_by_async
+    # async def _initial_data(self):
+    def _initial_data(self):
         stock_id = self.stock_id_combo.get()
         if self.prev_id != stock_id:
+            # 月財報
+            self.month_df = self.data_getter.retrieve_month_data(stock_id).loc[::-1].T.rename_axis("內容")
+            # 季財報
+            self.season_df = self.data_getter.retrieve_season_data(stock_id).loc[::-1].T.rename_axis(["分類", "內容"])
+            # 現金流
+            self.cash_df = self.data_getter.retrieve_cash_data(stock_id).loc[::-1].T.rename_axis("內容")
+            # 預估股價
+            self.est_price_df = self.data_getter.retrieve_price_estimation(stock_id).loc[::-1].T.rename_axis(["程度", "內容"])
+            # 記錄此次分析股票代號
+            self.prev_id = self.stock_id_combo.get()
+
             # 月財報
             month_setting = {
                 "title": "股價/月營收年增",
@@ -544,24 +556,13 @@ class StockAnalysisPage(BaseFrame):
                 "xlabel": ["日期"],
                 "ylabel": ["價位", "增幅(%)"],
             }
-            self.month_df = data_getter.retrieve_month_data(stock_id).loc[::-1].T.rename_axis("內容")
-            fig, setting = data_getter.prepare_df_to_draw(stock_id, month_setting)
+            fig, setting = self.data_getter.prepare_df_to_draw(self.stock_id_combo.get(), month_setting)
             self.month_fig = self._draw_figure(fig, setting)
 
             # 季財報
-            self.season_df = data_getter.retrieve_season_data(stock_id).loc[::-1].T.rename_axis(["分類", "內容"])
             self.season_fig = self._draw_season_ana_figures()
 
-            # 現金流
-            self.cash_df = data_getter.retrieve_cash_data(stock_id).loc[::-1].T.rename_axis("內容")
-
-            # 預估股價
-            self.est_price_df = data_getter.retrieve_price_estimation(stock_id).loc[::-1].T.rename_axis(["程度", "內容"])
-
-            # 記錄此次分析股票代號
-            self.prev_id = self.stock_id_combo.get()
             sys_processor.write_to_json("analysis[]", "cache_id", self.prev_id)
-
         self.prepared = True
 
     def switch_combo_source(self):
@@ -594,6 +595,7 @@ class StockAnalysisPage(BaseFrame):
     def activate_tasks(self, df, fig=None):
         if self.prepared and not df.empty:
             self.btn_switch(disable=False)
+            self._clear_interface()
             self.stock_id_combo["values"] = list(set(list(self.stock_id_combo["values"]) + [self.prev_id]))
             self.stock_id_combo.update()
             self._create_table(df, fig)
