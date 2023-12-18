@@ -107,8 +107,8 @@ class BaseFrame(Frame):
         self.scroll_txt.delete(1.0, "end")
 
     def _resize_window(self):
-        required_width = self.winfo_reqwidth()+20
-        required_height = self.winfo_reqheight()+20
+        required_width = max(self.winfo_reqwidth()+20, 960)
+        required_height = max(self.winfo_reqheight()+20, 680)
         self.master.geometry(f"{required_width}x{required_height}")
 
 

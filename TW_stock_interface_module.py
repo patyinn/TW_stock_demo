@@ -490,7 +490,6 @@ class StockAnalysisPage(BaseFrame):
         self.data_getter.db_path = db_path
 
         self.data_table = ttk.Treeview(self)
-        self.prepared = False
         self.canvas = FigureCanvasTkAgg()
         self.toolbar = None
 
@@ -532,38 +531,42 @@ class StockAnalysisPage(BaseFrame):
 
         self._initial_data()
 
-    # @call_by_async
-    # async def _initial_data(self):
     def _initial_data(self):
+        self.btn_switch(disable=True)
         stock_id = self.stock_id_combo.get()
         if self.prev_id != stock_id:
             # 月財報
-            self.month_df = self.data_getter.retrieve_month_data(stock_id).loc[::-1].T.rename_axis("內容")
+            self.month_df = self.data_getter.retrieve_month_data(stock_id)
+            self.month_fig = plt.figure()
+            if not self.month_df.empty:
+                month_setting = {
+                    "title": "股價/月營收年增",
+                    "main": ["股價"],
+                    "sub": ["月營收年增率3個月移動平均", "月營收年增率12個月移動平均"],
+                    "xlabel": ["日期"],
+                    "ylabel": ["價位", "增幅(%)"],
+                }
+                fig, setting = self.data_getter.prepare_df_to_draw(self.stock_id_combo.get(), month_setting)
+                self.month_fig = self._draw_figure(fig, setting)
             # 季財報
-            self.season_df = self.data_getter.retrieve_season_data(stock_id).loc[::-1].T.rename_axis(["分類", "內容"])
+            self.season_df = self.data_getter.retrieve_season_data(stock_id)
+            self.season_fig = plt.figure()
+            if not self.season_df.empty:
+                self.season_fig = self._draw_season_ana_figures()
             # 現金流
-            self.cash_df = self.data_getter.retrieve_cash_data(stock_id).loc[::-1].T.rename_axis("內容")
+            self.cash_df = self.data_getter.retrieve_cash_data(stock_id)
             # 預估股價
-            self.est_price_df = self.data_getter.retrieve_price_estimation(stock_id).loc[::-1].T.rename_axis(["程度", "內容"])
+            self.est_price_df = self.data_getter.retrieve_price_estimation(stock_id)
+
             # 記錄此次分析股票代號
             self.prev_id = self.stock_id_combo.get()
 
-            # 月財報
-            month_setting = {
-                "title": "股價/月營收年增",
-                "main": ["股價"],
-                "sub": ["月營收年增率3個月移動平均", "月營收年增率12個月移動平均"],
-                "xlabel": ["日期"],
-                "ylabel": ["價位", "增幅(%)"],
-            }
-            fig, setting = self.data_getter.prepare_df_to_draw(self.stock_id_combo.get(), month_setting)
-            self.month_fig = self._draw_figure(fig, setting)
+            if not (self.month_df.empty and self.season_df.empty and self.cash_df.empty and self.cash_df.empty):
+                self.stock_id_combo["values"] = list(set(list(self.stock_id_combo["values"]) + [self.prev_id]))
+                self.stock_id_combo.update()
+                sys_processor.write_to_json("analysis[]", "cache_id", self.prev_id)
 
-            # 季財報
-            self.season_fig = self._draw_season_ana_figures()
-
-            sys_processor.write_to_json("analysis[]", "cache_id", self.prev_id)
-        self.prepared = True
+        self.btn_switch(disable=False)
 
     def switch_combo_source(self):
         now = sorted(list(self.stock_id_combo["values"]))
@@ -593,20 +596,10 @@ class StockAnalysisPage(BaseFrame):
             self.price_btn["state"] = "normal"
 
     def activate_tasks(self, df, fig=None):
-        if self.prepared and not df.empty:
-            self.btn_switch(disable=False)
-            self._clear_interface()
-            self.stock_id_combo["values"] = list(set(list(self.stock_id_combo["values"]) + [self.prev_id]))
-            self.stock_id_combo.update()
-            self._create_table(df, fig)
-            self._resize_table()
-            self._resize_window()
-            self.prepared = False
-        else:
-            self.btn_switch(disable=True)
-            self._clear_interface()
-
-            self.after(500, lambda: self.activate_tasks(df, fig))
+        self._clear_interface()
+        self._create_table(df, fig)
+        self._resize_table()
+        self._resize_window()
 
     def _clear_interface(self):
         self.data_table.delete(*self.data_table.get_children())
@@ -618,7 +611,7 @@ class StockAnalysisPage(BaseFrame):
             self.toolbar.destroy()
             self.toolbar = None
 
-    def _create_widget(self, figure, x=7, y=2, xs=1, ys=1, s=W + E + N + S, tool=True):
+    def _create_widget(self, figure, x=7, y=2, xs=1, ys=1, s=W+E+N+S, tool=True):
         self.canvas = FigureCanvasTkAgg(figure, self)
         self.canvas.draw()
         self.canvas.get_tk_widget().grid(row=y, column=x, sticky=s, rowspan=xs, columnspan=ys, padx=5, pady=5, ipadx=3, ipady=3)
@@ -667,11 +660,31 @@ class StockAnalysisPage(BaseFrame):
         self.data_table.configure(xscrollcommand=hsb.set)
 
     def _insert_table(self, df, fig):
+        if df.empty:
+            return
         df = df.copy()
         df.reset_index(inplace=True)
         df_rows = df.index.values
         df_cols = df.columns.tolist()
         self.data_table['columns'] = df_cols
+
+        # 數據的tag以及條件
+        self.data_table.tag_configure("error", foreground="red", background="orange")
+        self.data_table.tag_configure("warning", foreground="green", background="yellow")
+        self.data_table.tag_configure("important", foreground="blue", background="white")
+        conditions = {
+            '月營收月增率': [],
+            '月營收年增率': [],
+            "營業活動現金": [("{} < 0", "warning", 0)],
+            "自由現金流量": [("{} < 0", "warning", 2), ("{} < 0", "error", 5)],
+            "季營收年增率": [("{} <= 0", "warning", 0), ("{} <= 0", "error", 4)],
+            "營業利益成長率": [("{}.between(-30, -20)", "warning", 0), ("{} < -30", "error", 0)],
+            "營收市值比": [("{} < 20", "warning", 0)],
+            "每股稅後盈餘年成長率": [("{} < 0", "warning", 0)],
+            "負債總資產占比": [("{} > 40", "warning", 0)],
+            "無形資產占比": [("{} > 10", "warning", 0), ("{} > 30", "error", 0)],
+            # "折舊負擔比率": [df["折舊負擔比率"] > df["營業利益率"]],
+        }
 
         # 建立欄位名
         for n in range(len(df_cols)):
@@ -679,10 +692,26 @@ class StockAnalysisPage(BaseFrame):
             self.data_table.heading(df_cols[n], text=df_cols[n], anchor=CENTER)
 
         # 建立數值至表格中
-        self.data_table.tag_configure('highlight', background='#DD99FF')
+        _prev = None
         for m in range(len(df_rows)):
-            value = tuple(df.iloc[m].replace(['NaN', 'nan', np.nan], "").tolist())
-            self.data_table.insert(parent='', index="end", values=value, open=False)
+            values = df.iloc[m].replace(['NaN', 'nan', np.nan], "").tolist()
+            if values[0] == _prev:
+                values[0] = ""
+            elif _prev is not None:
+                empty_row = [""]*len(values)
+                self.data_table.insert(parent='', index="end", values=empty_row, open=False)
+
+            tag = conditions.get(values[1], "")
+            if isinstance(tag, list):
+                tags = ["important"]
+                ser = pd.to_numeric(df.iloc[m], errors='coerce').dropna().iloc[:8]
+                for cond, t, total in tag:
+                    if int(eval(cond.format("ser")).sum()) > int(total):
+                        tags.append(t)
+                tag = tags
+
+            self.data_table.insert(parent='', index="end", values=values, open=False, tags=tag)
+            _prev = df.iloc[m, 0]
 
         if fig:
             self._create_widget(fig)
