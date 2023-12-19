@@ -569,17 +569,17 @@ class StockAnalysisPage(BaseFrame):
         self.btn_switch(disable=False)
 
     def switch_combo_source(self):
-        now = sorted(list(self.stock_id_combo["values"]))
+        text_now = sorted(list(self.stock_id_combo["values"]))
         record = sorted(sys_processor.read_from_json("analysis", "cache_id") or [])
         select_stock = sorted(sys_processor.read_from_json("analysis", "select_stock") or [])
         if not record and not select_stock:
             self.stock_id_combo["values"] = ["2330"]
-        elif now == record:
+        elif text_now == record:
             self.stock_id_combo["values"] = select_stock
-            self.stock_id_combo["text"] = "切換來源 (歷史)"
+            self.source_btn["text"] = "切換來源 (歷史)"
         else:
             self.stock_id_combo["values"] = record
-            self.stock_id_combo["text"] = "切換來源 (選股)"
+            self.source_btn["text"] = "切換來源 (選股)"
 
     def btn_switch(self, disable=False):
         if disable:
@@ -643,7 +643,7 @@ class StockAnalysisPage(BaseFrame):
 
         style = ttk.Style()
         style.map('Styled.Treeview', foreground=_fixed_map('foreground'), background=_fixed_map('background'))
-        style.configure('Styled.Treeview', rowheight=20)
+        style.configure('Styled.Treeview', rowheight=35)
         self.data_table = ttk.Treeview(self, height=15, style="Styled.Treeview")
         self.data_table.grid(row=2, column=0, columnspan=6)
 
@@ -658,13 +658,19 @@ class StockAnalysisPage(BaseFrame):
         hsb.grid(column=0, row=3, columnspan=6, sticky=W + E)
         self.data_table.configure(yscrollcommand=vsb.set)
         self.data_table.configure(xscrollcommand=hsb.set)
-
+    
+    def _strip_index(self, indexes):
+        result = ["", ""]
+        result[0] = f"{indexes[0][:5]}\n{indexes[0][5:]}" if len(indexes[0]) >= 5 else indexes[0]
+        result[1] = f"{indexes[1][:5]}\n{indexes[1][5:]}" if len(indexes[1]) >= 8 else indexes[1]
+        return tuple(result)
+            
     def _insert_table(self, df, fig):
         if df.empty:
             return
         df = df.copy()
+        df.index = df.index.map(lambda s: self._strip_index(s))
         df.reset_index(inplace=True)
-        df_rows = df.index.values
         df_cols = df.columns.tolist()
         self.data_table['columns'] = df_cols
 
@@ -693,8 +699,9 @@ class StockAnalysisPage(BaseFrame):
 
         # 建立數值至表格中
         _prev = None
-        for m in range(len(df_rows)):
+        for m in range(len(df)):
             values = df.iloc[m].replace(['NaN', 'nan', np.nan], "").tolist()
+
             if values[0] == _prev:
                 values[0] = ""
             elif _prev is not None:
@@ -725,7 +732,10 @@ class StockAnalysisPage(BaseFrame):
         for n in range(len(self.data_table['columns'])):
             col = self.data_table['columns'][n]
             column_width = tkFont.Font().measure(children[n])
-            column_width -= 80 if column_width > 150 else 10
+            if column_width > 150:
+                column_width -= 100
+            elif column_width > 100:
+                column_width -= 50
             self.data_table.column(col, minwidth=50, width=column_width, stretch=NO, anchor=CENTER)
 
     def _draw_figure(self, df, setting):
