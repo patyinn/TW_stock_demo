@@ -16,8 +16,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.pylab import mpl
 
 from utils import call_by_async
-from TW_stock_module import SystemProcessor, TWStockRetrieveModule, FinancialAnalysis, SelectStock, CrawlerProcessor
-from TW_stock_base_frame import BaseScrapperFrame, BaseTemplateFrame, msg_queue, BaseFrame
+from data_module import SystemProcessor, TWStockRetrieveModule, FinancialAnalysis, SelectStock, CrawlerProcessor
+from base_frame import BaseScrapperFrame, BaseTemplateFrame, msg_queue, BaseFrame
 
 
 class StockApp(Tk):

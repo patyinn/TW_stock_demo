@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 from tkinter import Button, Label, StringVar, W, E, N, S, NSEW, Frame
 from tkinter import ttk, scrolledtext, WORD, END, filedialog
 
-from TW_stock_module import CrawlerProcessor
+from data_module import CrawlerProcessor
 from utils import call_by_async
 
 msg_queue = Queue()
