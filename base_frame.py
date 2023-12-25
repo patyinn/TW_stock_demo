@@ -60,7 +60,7 @@ class BaseFrame(Frame):
     # 將佇列中的訊息顯示到scrolled text上
     def handle_message(self):
         _pbar_line = 0
-        if self._msg_flag:
+        while self._msg_flag:
             if not msg_queue.empty():
                 msg = msg_queue.get()
                 end_position = self.scroll_txt.index(END)
@@ -81,7 +81,7 @@ class BaseFrame(Frame):
 
             # 繼續定期檢查
             self.update()
-            self.after(10, self.handle_message)
+            time.sleep(0.01)
 
     # 清空訊息佇列
     def _clear_queue(self):
