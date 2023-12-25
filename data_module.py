@@ -155,7 +155,7 @@ class CrawlerProcessor(Crawler):
         self.conn = conn
         self.msg_queue = msg_queue
 
-    async def exec_func(self, table, from_date, to_date, force=False, multi_threads=True):
+    async def exec_func(self, table, from_date, to_date, force=False, multi_threads=False):
         additional_arg = {}
         if table == "price":
             date = self.date_range(from_date, to_date)

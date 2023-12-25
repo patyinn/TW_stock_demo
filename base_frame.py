@@ -49,8 +49,8 @@ class BaseFrame(Frame):
         return self._msg_flag
 
     @msg_flag.setter
-    def msg_flag(self, value: bool):
-        self._msg_flag = value
+    def msg_flag(self, start: bool):
+        self._msg_flag = start
         if self._msg_flag:
             # Turn-on the worker thread.
             threading.Thread(target=self.handle_message, daemon=True).start()
@@ -60,7 +60,7 @@ class BaseFrame(Frame):
     # 將佇列中的訊息顯示到scrolled text上
     def handle_message(self):
         _pbar_line = 0
-        while self._msg_flag:
+        if self._msg_flag:
             if not msg_queue.empty():
                 msg = msg_queue.get()
                 end_position = self.scroll_txt.index(END)
@@ -81,7 +81,7 @@ class BaseFrame(Frame):
 
             # 繼續定期檢查
             self.update()
-            time.sleep(0.01)
+            self.after(10, self.handle_message)
 
     # 清空訊息佇列
     def _clear_queue(self):
