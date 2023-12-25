@@ -430,8 +430,8 @@ class SelectStockPage(BaseTemplateFrame):
             stop_loss=sl, stop_profit=sp
         )
 
-        msg_queue.put('交易利潤 :\n {}\n'.format(profit))
-        msg_queue.put('交易紀錄 :\n {}\n'.format(record))
+        print('交易利潤 :\n {}\n'.format(profit))
+        print('交易紀錄 :\n {}\n'.format(record))
         msg_queue.put("完成")
 
     # 顯示作業進度
