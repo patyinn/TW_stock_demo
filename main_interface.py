@@ -1,5 +1,4 @@
 import os
-import time
 import asyncio
 import sqlite3
 import numpy as np
@@ -16,7 +15,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.pylab import mpl
 
 from utils import call_by_async
-from data_module import SystemProcessor, TWStockRetrieveModule, FinancialAnalysis, SelectStock, CrawlerProcessor
+from data_module import SystemProcessor, TWStockRetrieveModule, FinancialAnalysis, CrawlerProcessor
+from finlab.data_module import SelectStock
 from base_frame import BaseScrapperFrame, BaseTemplateFrame, msg_queue, BaseFrame
 
 
