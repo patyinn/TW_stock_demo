@@ -11,6 +11,8 @@
 2. 利用多線程，以異步的形式執行後台工作，或是特別一條線程來顯示當前工作進度等相關資訊於介面上，使用上就比較不會卡頓。
 3. 可儲存一些常用路徑、最新一次的選股條件於json檔案，當作系統快取，以便快速運用。
 4. 主頁面可以指定db，db是採用sqlite，剛開始啟動時會有預設路徑。
+![image](https://github.com/patyinn/TW_stock_demo/assets/85993427/42858179-7d9e-41ab-92bb-f916bade2593)
+
 
 ## 介面功能詳細介紹:
 
@@ -23,6 +25,10 @@
    * 訊息框顯示最多20行資料，如果有progress bar會刪除舊的更新進度。
    * 爬取季報會儲存清洗完資料的pickle檔，如果步手動刪除的話，後面有重複的日期會抓取檔案內容來更新。
 
+![image](https://github.com/patyinn/TW_stock_demo/assets/85993427/29ae28a6-bf1d-49b2-b295-7333707f8337)
+![image](https://github.com/patyinn/TW_stock_demo/assets/85993427/7e12d4ca-f3a6-4edf-bfe5-e3ae66ffa2c1)
+
+
 ### 2. 更新excel功能:
    * 主要介面包含excel樣板及儲存路徑選擇、要更新的股票id及動作，訊息欄(scrolled_text)，清除訊息、更新資料庫、離開、結束程式按鈕。
    * 程式會自動抓取儲存路徑內所有含有股票id的excel，顯示於欲更新股票id的下拉選單(combobox)，也可以輸入一個新的id，程式會根據id自動建立一個新的excel檔案於儲存路徑上。
@@ -31,6 +37,9 @@
    * 更新excel的資料與第4點的分析功能使用同樣資料結果，由此類別繼承來共享函式，既可以確保結果一致，也不用到處修改散落各地的資料處理程式。
    * 對於要填入的資料如果有加入警報，如果資料本身超過警戒值，會在excel對該筆資料加入警告顏色。
 
+![image](https://github.com/patyinn/TW_stock_demo/assets/85993427/2b0ffd53-47d6-4423-b2d6-bab09ea62a6f)
+
+
 ### 3. 選股功能:
    * 主要介面包含excel樣板、所有內建好的選股條件、起始與回測日期，訊息欄(scrolled_text)，清除訊息、更新系統快取、離開、結束程式按鈕。
    * 選股策略以及回測系統皆為finlab提供的程式，並做小幅度微調。
@@ -38,6 +47,10 @@
    * 可將選股結果在指定路徑儲存成excel檔，選股結果也會存財報分析頁面的下拉選單以供選擇。
    * 執行回測則是以當下的選條件進行一段時間的結果，會顯示績效結果的matplotlib圖。
    * 執行結果、回測系統皆是使用異步完成，執行期間的步驟流程會顯示於訊息欄中。
+
+![image](https://github.com/patyinn/TW_stock_demo/assets/85993427/76adda98-d048-48e1-aff5-cf1955655a1d)
+![image](https://github.com/patyinn/TW_stock_demo/assets/85993427/6f8c75cf-5932-4645-bacc-8e9de5008241)
+
 
 ### 4. 財報分析功能:
    * 介面主要包含可輸入股票id欄位，切換歷史搜尋/選股結果按鈕，分析月報、季報、金流分析等等。
@@ -50,3 +63,7 @@
    * 抓取資料的方式是，將需要的代號財報欄位一口氣抓出，再將資料整理過的結果儲存於類別變數中，以便當作快取使用，儲存的資料格式是index:(股票id, 時間), columns: (分類、細項)。
    * 抓取並清理資料的結果是與更新excel功能共用的，故可以減少重複工作，以及資料結果不一致的可能。
    * 程式採用同步執行，由於繪製treeview元件、繪圖、增加下拉選單選項都無法用異步來做，抓取資料及整理資料時間不會太長，故選用同步。
+
+![image](https://github.com/patyinn/TW_stock_demo/assets/85993427/464ee0b6-a3e0-49d1-9a26-93f2e9ee4970)
+![image](https://github.com/patyinn/TW_stock_demo/assets/85993427/e579d4b2-8a50-4bf4-b1a5-de5de10f7cb3)
+
