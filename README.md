@@ -26,6 +26,7 @@
    * 爬取季報會儲存清洗完資料的pickle檔，如果步手動刪除的話，後面有重複的日期會抓取檔案內容來更新。
 
 ![image](https://github.com/patyinn/TW_stock_demo/assets/85993427/29ae28a6-bf1d-49b2-b295-7333707f8337)
+
 ![image](https://github.com/patyinn/TW_stock_demo/assets/85993427/7e12d4ca-f3a6-4edf-bfe5-e3ae66ffa2c1)
 
 
@@ -49,6 +50,7 @@
    * 執行結果、回測系統皆是使用異步完成，執行期間的步驟流程會顯示於訊息欄中。
 
 ![image](https://github.com/patyinn/TW_stock_demo/assets/85993427/76adda98-d048-48e1-aff5-cf1955655a1d)
+
 ![image](https://github.com/patyinn/TW_stock_demo/assets/85993427/6f8c75cf-5932-4645-bacc-8e9de5008241)
 
 
