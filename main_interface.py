@@ -468,6 +468,7 @@ class SelectStockPage(BaseTemplateFrame):
     def _show_result_and_handle_excel(self):
         existed = self._get_files_id()[0]
         folder_path = os.path.join(self.path, "選股結果")
+        print(folder_path)
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
 

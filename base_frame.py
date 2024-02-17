@@ -200,7 +200,7 @@ class BaseTemplateFrame(BaseFrame):
                                                 postcommand=lambda: self.template_path_combo.configure(
                                                     values=self.sys_processor.get_latest_path_sql("file")))
         self.path_text = StringVar()
-        self.path = self.sys_processor.get_latest_path_sql("directory") or os.path.abspath('')
+        self.path = self.sys_processor.get_latest_path_sql(self.directory_type) or os.path.abspath('')
         self.path_text.set(self.path)
         self.path_combo = ttk.Combobox(self, width=70, textvariable=self.path_text,
                                        postcommand=lambda: self.path_combo.configure(
@@ -249,6 +249,7 @@ class BaseTemplateFrame(BaseFrame):
                                             initialdir=self.path)
         self.path_combo.delete(0, 'end')
         self.path_combo.insert(0, directory)
+        self.path = directory
         if self.directory_type == "directory":
             self.sys_processor.save_path_sql(directory)
         else:
