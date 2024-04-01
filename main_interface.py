@@ -440,12 +440,8 @@ class SelectStockPage(BaseTemplateFrame):
         for (chk, chk_var, combo, entry), cond in zip(self.component_list, self.create_condition_list):
             cache = self.sys_processor.get_select_stock_condition_to_sql(cond)
             chk_var.set(bool(cache["activate"]))
-            if chk_var.get():
-                entry.insert(0, str(cache["cond_value"]) or "")
-                combo.insert(0, str(cache["operator"]) or "")
-            else:
-                entry.delete(0, "end")
-                combo.delete(0, "end")
+            entry.insert(0, str(cache["cond_value"]) or "")
+            combo.insert(0, str(cache["operator"]) or "")
 
         sp_cache = self.sys_processor.get_select_stock_condition_to_sql("停利")
         sl_cache = self.sys_processor.get_select_stock_condition_to_sql("停損")
