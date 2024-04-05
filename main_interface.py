@@ -370,6 +370,14 @@ class SelectStockPage(BaseTemplateFrame):
 
     # 選定後，自動帶入上次執行成功的條件
     def _save_select_stock_condition(self):
+        # 清空原有的列表
+        self.chk_list.clear()
+        self.chk_var_list.clear()
+        self.combo_list.clear()
+        self.entry_list.clear()
+        self.content_list.clear()
+
+        # 重新抓取元件的當下狀態
         for chk, chk_var, combo, entry in self.component_list:
             self.chk_list.append(chk.cget("text"))
             self.chk_var_list.append(chk_var.get() if chk_var else "")
